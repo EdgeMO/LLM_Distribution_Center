@@ -1,0 +1,46 @@
+{
+    "input_mode" : 0,
+    "output_mode" : 0,
+    "edge_num":2,
+    "model_num":10,
+    "task_type_num":5,
+    "center_model_config": {
+        "model_directory": "",
+        "model_parameters": [
+            {
+                "model_name": "",
+                "model_task_type": "",
+                "model_index": "",
+                "model_size": 1
+            },
+            {
+                "model_name": "",
+                "model_task_type": "",
+                "model_index": "",
+                "model_size": 2
+            },
+            {
+                "model_name": "",
+                "model_task_type": "",
+                "model_index": "",
+                "model_size": 3
+            },
+            {
+                "model_name": "",
+                "model_task_type": "",
+                "model_index": "",
+                "model_size": 1.2
+            }
+        ]
+    },
+    "edge_ip_config": {
+        "1": {
+            "ip": "192.168.3.2",
+            "port": "2000"
+        },
+        "2": {
+            "ip": "192.168.3.4",
+            "port": "2000"
+        }
+    }
+}
