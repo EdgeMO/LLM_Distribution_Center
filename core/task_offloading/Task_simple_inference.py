@@ -98,7 +98,7 @@ def process(num_steps=100):
     distributor = SimpleInference(num_nodes=3, num_tasks=10)
     
     for step in range(num_steps):
-        # 这里应该是从真实系统获取观察数据
+        # 从真实系统获取观察数据
         # 格式: [节点索引, 时延, 准确率, 内存剩余量]
         observations = [
             [0, np.random.exponential(1), np.random.uniform(0.8, 1.0), np.random.uniform(0.3, 1.0)],

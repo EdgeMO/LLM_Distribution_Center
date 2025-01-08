@@ -1,37 +1,24 @@
 {
-    "input_mode" : 0,
-    "output_mode" : 0,
-    "edge_num":2,
-    "model_num":10,
-    "task_type_num":5,
+    "input_processor_task_source_type": 0,
+    "output_processor_task_source_type": 0,
+    "local_input_directory": "",
+    "edge_num": 2,
+    "model_num": 10,
+    "task_type_num": 5,
     "center_model_config": {
-        "model_directory": "",
-        "model_parameters": [
-            {
-                "model_name": "",
-                "model_task_type": "",
-                "model_index": "",
+        "model_directory": "model",
+        "model_parameters": {
+            "0": {
+                "model_name": "gemma",
+                "model_task_type": 1,
                 "model_size": 1
             },
-            {
+            "1":{
                 "model_name": "",
-                "model_task_type": "",
-                "model_index": "",
-                "model_size": 2
-            },
-            {
-                "model_name": "",
-                "model_task_type": "",
-                "model_index": "",
-                "model_size": 3
-            },
-            {
-                "model_name": "",
-                "model_task_type": "",
-                "model_index": "",
-                "model_size": 1.2
+                "model_task_type": 0,
+                "model_size": 1
             }
-        ]
+        }
     },
     "edge_ip_config": {
         "1": {

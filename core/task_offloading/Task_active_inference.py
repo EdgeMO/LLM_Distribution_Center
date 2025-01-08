@@ -9,7 +9,7 @@ from scipy.special import softmax
 
 ActiveInferenceTaskDistributor 类实现了主动推理算法：
 
-初始化包括观察模型(A)、转移模型(B)、偏好模型(C)和先验信念(D)。
+初始化包括观察模型(A)、转移模型(B)、偏好模型(C)和先验信念(D)
 update_beliefs 方法根据观察更新信念状态。
 select_action 方法为每个任务选择最优的边缘节点。
 观察数据格式为 [节点索引, 准确率, 时延, 内存剩余量]，符合您的需求。
@@ -113,7 +113,7 @@ class ActiveInferenceTaskDistributor:
         assignments = self.select_action()
         return assignments
 
-# 模拟边缘计算场景
+# 模拟计算场景
 def process(num_steps=100):
     distributor = ActiveInferenceTaskDistributor(num_nodes=3, num_tasks=10)
     

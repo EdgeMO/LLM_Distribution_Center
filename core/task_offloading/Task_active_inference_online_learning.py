@@ -38,9 +38,9 @@ from scipy.special import softmax
     
     
 class ActiveInferenceTaskDistributorOnlineLearning:
-    def __init__(self, num_nodes, num_tasks, num_states=5, learning_rate=0.01):
+    def __init__(self, num_nodes, batch_num, num_states=5, learning_rate=0.01):
         self.num_nodes = num_nodes
-        self.num_tasks = num_tasks
+        self.batch_num = batch_num
         self.num_states = num_states
         self.learning_rate = learning_rate
 
@@ -113,8 +113,8 @@ class ActiveInferenceTaskDistributorOnlineLearning:
         self.B = self.transition_counts / self.transition_counts.sum(axis=0, keepdims=True)
 
     def select_action(self):
-        assignments = np.zeros(self.num_tasks, dtype=int)
-        for task in range(self.num_tasks):
+        assignments = np.zeros(self.batch_num, dtype=int)
+        for task in range(self.batch_num):
             expected_free_energy = np.zeros(self.num_nodes)
             for node in range(self.num_nodes):
                 q_s = np.tensordot(self.B, self.beliefs[node], axes=([1],[0]))
@@ -145,7 +145,7 @@ class ActiveInferenceTaskDistributorOnlineLearning:
 
 # 模拟边缘计算场景
 def process(num_steps=1000):
-    distributor = ActiveInferenceTaskDistributorOnlineLearning(num_nodes=3, num_tasks=10)
+    distributor = ActiveInferenceTaskDistributorOnlineLearning(num_nodes=3, batch_num=10)
     
     for step in range(num_steps):
         # 模拟观察数据 [节点索引, 准确率, 时延, 内存剩余量]
@@ -163,8 +163,8 @@ def process(num_steps=1000):
                 tasks = np.where(assignments == node)[0]
                 print(f"  Node {node}: Tasks {tasks}")
             print(f"  Observations: {observations}")
-            print(f"  A matrix:\n{distributor.A}")
-            print(f"  B matrix:\n{distributor.B}")
+            #print(f"  A matrix:\n{distributor.A}")
+            #print(f"  B matrix:\n{distributor.B}")
             print()
 
 # 运行模拟

@@ -24,13 +24,13 @@ class EdgeCommunicator:
         # 保存配置文件的路径
         self.config_file_path = config_file_path
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.clients = {}
+        self.clients_index_ip_dict = {}
 
     def process(self, local_config_file_read = False):
         # 开启一个线程，用于接受所有端节点的连接
         threading.Thread(target=self.server_accept_all_connections, args=(local_config_file_read,)).start()
     
-    def server_accept_all_connections(self, local_config_file_read = False):
+    def server_accept_all_connections(self, local_config_file_read):
         """
             起一个服务器, 记录所有连接的客户端的socket和地址, 并且更新连接的状态
         """
@@ -39,24 +39,29 @@ class EdgeCommunicator:
         print(f"Server is listening on {self.host}:{self.port}")
 
         if local_config_file_read == False:
+            index = 0 # the index of client connection
             while True:
-                # 记录所有连接的客户端的socket和地址
+                # 记录所有连接的客户端的 index socket和地址
                 client_socket, addr = self.server_socket.accept()
                 ip, port = addr
-                print(f"Connected by {ip}:{port}")
-                self.clients[ip] = client_socket    
+                self.clients_index_ip_dict[str(index)] = {}
+                self.clients_index_ip_dict[str(index)]['ip'] = ip
+                self.clients_index_ip_dict[str(index)]['port'] = port
+                self.clients_index_ip_dict[str(index)]['socket'] = client_socket
+                index += 1 
+                # TBD  data receiving logic
+
         if local_config_file_read == True:
             with open(self.config_file_path, 'r') as f:
                 config = json.load(f)
-                
-                print(config)
+                ip_config = config.get('edge_ip_config',None)
+                self.clients_index_ip_dict = ip_config
+                print(ip_config)
             
     def state_monitor(self):
-        """
-        基于收到的客户端，更新本地的状态
-        1. 接收到边缘节点传回的信息
-        2. 基于核心函数的计算方式, 更新主动推理的空间状态
-        """
+        
+        
+        pass
 
 
 
