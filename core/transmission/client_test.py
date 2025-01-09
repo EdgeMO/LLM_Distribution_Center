@@ -25,7 +25,7 @@ def client_thread(server_ip, server_port, client_id):
     except Exception as e:
         print(f"Client {client_id} encountered an error: {e}")
 
-def simulate_multiple_clients(num_clients, server_ip='0.0.0.0', server_port=12345):
+def simulate_multiple_clients(num_clients, server_ip='127.0.0.1', server_port=12345):
     threads = []
     for i in range(num_clients):
         thread = threading.Thread(target=client_thread, args=(server_ip, server_port, i))

@@ -18,7 +18,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
 class EdgeCommunicator:
-    def __init__(self, config_file_path, host='0.0.0.0', port=12345):
+    def __init__(self, config_file_path, host='127.0.0.1', port=12345):
         self.host = host
         self.port = port    
         self.config_file_path = config_file_path
@@ -32,6 +32,7 @@ class EdgeCommunicator:
     def handle_client(self, client_socket, index):
         while True:
             try:
+                #print(f"Waiting for data from client {index}...")
                 data = client_socket.recv(1024)
                 if not data:
                     print(f"Client {index} disconnected.")
@@ -44,14 +45,15 @@ class EdgeCommunicator:
                         self.clients_index_ip_dict[str(index)]['accuracy'] = message['accuracy']
                         self.clients_index_ip_dict[str(index)]['time'] = message['time']
                         self.clients_index_ip_dict[str(index)]['memory_usage'] = message['memory_usage']
+                    
+                    # 打印接收到的数据
+                    print(f"Received data from client {index}: {message}")
 
             except ConnectionResetError:
                 print(f"Client {index} forcibly closed the connection.")
                 break
             except json.JSONDecodeError:
                 print(f"JSON decode error from client {index}.")
-                
-        client_socket.close()
         
     def server_accept_all_connections(self, local_config_file_read):
         self.server_socket.bind((self.host, self.port))
@@ -83,11 +85,6 @@ class EdgeCommunicator:
                 ip_config = config.get('edge_ip_config',None)
                 self.clients_index_ip_dict = ip_config
                 print(ip_config)
-            
-    def state_monitor(self):
-        
-        
-        pass
 
 
 
