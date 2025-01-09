@@ -18,37 +18,63 @@ import sys
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
 class EdgeCommunicator:
-    def __init__(self, config_file_path , host = '0.0.0.0', port = 12345):
+    def __init__(self, config_file_path, host='0.0.0.0', port=12345):
         self.host = host
         self.port = port    
-        # 保存配置文件的路径
         self.config_file_path = config_file_path
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.clients_index_ip_dict = {}
+        self.lock = threading.Lock()  # 创建一个线程锁
 
-    def process(self, local_config_file_read = False):
-        # 开启一个线程，用于接受所有端节点的连接
+    def process(self, local_config_file_read=False):
         threading.Thread(target=self.server_accept_all_connections, args=(local_config_file_read,)).start()
-    
+        
+    def handle_client(self, client_socket, index):
+        while True:
+            try:
+                data = client_socket.recv(1024)
+                if not data:
+                    print(f"Client {index} disconnected.")
+                    break
+
+                message = json.loads(data.decode('utf-8'))
+                if 'accuracy' in message and 'time' in message and 'memory_usage' in message:
+                    # 使用锁保护对共享字典的访问
+                    with self.lock:
+                        self.clients_index_ip_dict[str(index)]['accuracy'] = message['accuracy']
+                        self.clients_index_ip_dict[str(index)]['time'] = message['time']
+                        self.clients_index_ip_dict[str(index)]['memory_usage'] = message['memory_usage']
+
+            except ConnectionResetError:
+                print(f"Client {index} forcibly closed the connection.")
+                break
+            except json.JSONDecodeError:
+                print(f"JSON decode error from client {index}.")
+                
+        client_socket.close()
+        
     def server_accept_all_connections(self, local_config_file_read):
-        """
-            起一个服务器, 记录所有连接的客户端的socket和地址, 并且更新连接的状态
-        """
         self.server_socket.bind((self.host, self.port))
         self.server_socket.listen(5)
         print(f"Server is listening on {self.host}:{self.port}")
 
-        if local_config_file_read == False:
-            index = 0 # the index of client connection
+        if not local_config_file_read:
+            index = 0
             while True:
-                # 记录所有连接的客户端的 index socket和地址
                 client_socket, addr = self.server_socket.accept()
                 ip, port = addr
-                self.clients_index_ip_dict[str(index)] = {}
-                self.clients_index_ip_dict[str(index)]['ip'] = ip
-                self.clients_index_ip_dict[str(index)]['port'] = port
-                self.clients_index_ip_dict[str(index)]['socket'] = client_socket
-                index += 1 
+                with self.lock:
+                    self.clients_index_ip_dict[str(index)] = {
+                        'ip': ip,
+                        'port': port,
+                        'socket': client_socket
+                    }
+                print(f"Accepted connection from {ip}:{port} with index {index}")
+
+                client_thread = threading.Thread(target=self.handle_client, args=(client_socket, index))
+                client_thread.daemon = True
+                client_thread.start()
+                index += 1
                 # TBD  data receiving logic
 
         if local_config_file_read == True:
@@ -67,4 +93,4 @@ class EdgeCommunicator:
 
 if __name__ == "__main__":
     communicator = EdgeCommunicator(config_file_path='config/Running_config.json')
-    communicator.process(local_config_file_read = True)
+    communicator.process(local_config_file_read = False)
