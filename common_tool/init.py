@@ -12,3 +12,8 @@ def output_processor_config_init(config_path):
             # local task read
             task_input_directory = res.get("local_input_directory", None)
         return center_model_config, model_directory, output_processor_task_source_type, task_input_directory
+def client_server_config_init(config_path):
+    with open(file = config_path, mode= 'r') as file:
+        res = json.load(file)
+        server_ip_config = res.get('server_ip_config',None)
+        return server_ip_config

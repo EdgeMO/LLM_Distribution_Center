@@ -29,5 +29,9 @@
             "ip": "192.168.3.4",
             "port": "2000"
         }
+    },
+    "server_ip_config":{
+        "server_ip" : "127.0.0.1",
+        "server_port" : 12345
     }
 }

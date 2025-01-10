@@ -1,3 +1,3 @@
-from core.transmission.EdgeCommunicator import EdgeCommunicator
+from core.transmission.CenterEdgeCommunicator import EdgeCommunicator
 from core.task_offloading.Task_active_inference import  ActiveInferenceTaskDistributorOnlineLearning
 # 负责整体节点的调度

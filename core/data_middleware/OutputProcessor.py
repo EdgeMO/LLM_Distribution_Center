@@ -4,10 +4,10 @@ import sys
 current_working_directory = os.getcwd()
 sys.path.append(current_working_directory)
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
-# 基于算法的输出 (模型和任务)，生成对应的待传输设备
+
 from common_tool.init import *
 
-
+# 基于算法的输出 (模型和任务)，生成对应的待传输设备
 class OutputProcessor:
     """
     generate output data and transmission config well formated for networking transmission 
