@@ -6,8 +6,6 @@ class InputProcessor:
     """
     def __init__(self, input_type, file_path = None):
         """
-        
-
         Args:
             input_type (_type_): indicates the type of the input data  0 : local_file, 1 : tcp transmission
             file_path (_type_): local file path, activates when input_type is 0

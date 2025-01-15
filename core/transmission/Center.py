@@ -1,12 +1,9 @@
 # author : junyuan wu
-# description: 用于与边缘设备通信的类，包括发送任务消息和发送模型文件
+
 """
 
-支持两种连接方式，
+center core workspace
 
-一种是本地读取配置文件，读取固定的ip地址
-
-另一种是通过socket连接，接受所有的边缘节点的连接
 
 """
 
@@ -17,7 +14,9 @@ import os
 import sys
 import queue
 import time
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
+from config.type import DistributionType, TaskType, EnumEncoder
 
 class EdgeCommunicator:
     def __init__(self, config_file_path, host='127.0.0.1', port=12345):
@@ -29,22 +28,14 @@ class EdgeCommunicator:
         self.lock = threading.Lock()  # 创建一个线程锁
         self.message_queues = {}  # 用来存储每个客户端的消息队列
 
-    def process(self):
+    def establish_connection(self):
         
-        # 负责建立所有的边缘节点的连接，并且基于收到的信息维护系统观测量
+        # 负责建立网路连接
         threading.Thread(target=self.server_accept_all_connections).start()
-        
-        
         time.sleep(5)  # 等待服务器线程启动
-        
-        # 负责算法的实际输出至边缘端
-        message = {
-            'type':0,
-            "content": "Hello, Edge 1!"
-        }
-        self.send_message_to_client(1, message)
-        
-    def receive_from_client(self, client_socket, index):
+    
+
+    def receive_from_client_(self, client_socket, index):
         """每有来自终端的信息的时候，更新本地的观测观测量
 
         Args:
@@ -75,17 +66,6 @@ class EdgeCommunicator:
                 break
             except json.JSONDecodeError:
                 print(f"JSON decode error from client {index}.")
-
-    def send_to_client(self, client_socket, index):
-        """专门的线程从队列中取消息并发送到客户端"""
-        while True:
-            try:
-                message = self.message_queues[str(index)].get()
-                message_json = json.dumps(message)
-                client_socket.sendall(message_json.encode('utf-8'))  # 假设消息是字符串
-            except Exception as e:
-                print(f"Error sending message to client {index}: {e}")
-                break
     
     def send_message_to_client(self, index, message):
         """ send message to client by index, e.g. insert message into queue
@@ -99,8 +79,25 @@ class EdgeCommunicator:
             self.message_queues[str(index)].put(message)
         else:
             print(f"No client with index {index} is connected.")
+  
+    def send_to_client_(self, client_socket, index):
+        """专门的线程从队列中取消息并发送到客户端"""
+        while True:
+            try:
+                message = self.message_queues[str(index)].get()
+                message_json = json.dumps(message, cls=EnumEncoder)
+                client_socket.sendall(message_json.encode('utf-8'))  # 假设消息是字符串
+            except Exception as e:
+                print(f"Error sending message to client {index}: {e}")
+                break
     
     def server_accept_all_connections(self):
+        """
+        thread function
+        1. establish connection with all edge nodes
+        2. local state observation space update   "self.clients_index_ip_dict"
+        3. send task offloading decisions and model distribution to edge nodes
+        """
         self.server_socket.bind((self.host, self.port))
         self.server_socket.listen(5)
         print(f"Server is listening on {self.host}:{self.port}")
@@ -117,21 +114,31 @@ class EdgeCommunicator:
                 }
             self.message_queues[str(index)] = queue.Queue()  # 为每个客户端创建消息队列
             print(f"Accepted connection from {ip}:{port} with index {index}")
-
+            
             # 开启线程，接收来自client 端的消息
-            client_thread = threading.Thread(target=self.receive_from_client, args=(client_socket, index))
+            client_thread = threading.Thread(target=self.receive_from_client_, args=(client_socket, index))
             client_thread.daemon = True
             client_thread.start()
             # 开启线程，给client 端发送消息
-            sending_thread = threading.Thread(target=self.send_to_client, args=(client_socket, index))
+            sending_thread = threading.Thread(target=self.send_to_client_, args=(client_socket, index))
             sending_thread.daemon = True
             sending_thread.start()
 
             index += 1
+    def get_observation(self):
+        """获取所有边缘节点的观测量"""
+        with self.lock:
+            return self.clients_index_ip_dict
 
 
 
 
 if __name__ == "__main__":
     communicator = EdgeCommunicator(config_file_path='config/Running_config.json')
-    communicator.process()
+    communicator.establish_connection()
+    # 算法实际的迭代过程 和任务下发有关
+    message_list = [
+        {"mode":DistributionType.TASK,"task_type": TaskType.QuestionAnswering, "token": "token1", "true_value": "value1"},
+        {"mode":DistributionType.TASK,"task_type": TaskType.TextClassification, "token": "token2", "true_value": "value2"}
+    ]
+    communicator.send_message_to_client(1, message_list)

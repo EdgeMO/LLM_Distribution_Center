@@ -9,9 +9,9 @@ from queue import Queue
 current_working_directory = os.getcwd()
 sys.path.append(current_working_directory)
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
-
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from common_tool.init import *
-
+from config.type import DistributionType, TaskType, EnumEncoder
 class Client_Connection:
     def __init__(self, config_path):
         self.server_config = client_server_config_init(config_path)
@@ -83,23 +83,25 @@ class Client_Connection:
                 if not data:
                     break
 
-                message = json.loads(data.decode('utf-8'))
-                message_type = message.get('type')
+                messages = json.loads(data.decode('utf-8'))
+                print(f"Client {client_id} received messages: {messages}")
+                for message in messages:
+                    message_type = message.get('mode')
 
-                if message_type == 0:
-                    # Handle text task
-                    self.task_queue.put(message)
-                    print(f"Client {client_id} received text task: {message}")
-                elif message_type == 1:
-                    # Handle model data
-                    model_name = message.get('model_name', f'model_{client_id}.mdl')
-                    model_data = message.get('model_data', '')
-                    model_path = os.path.join(self.models_directory, model_name)
-                    
-                    with open(model_path, 'w') as model_file:
-                        model_file.write(model_data)
-                    
-                    print(f"Client {client_id} stored model at {model_path}")
+                    if message_type == DistributionType.TASK:
+                        # Handle text task
+                        self.task_queue.put(message)
+                        print(f"Client {client_id} received text task: {message}")
+                    elif message_type == DistributionType.MODEL:
+                        # Handle model data
+                        model_name = message.get('model_name', f'model_{client_id}.mdl')
+                        model_data = message.get('model_data', '')
+                        model_path = os.path.join(self.models_directory, model_name)
+                        
+                        with open(model_path, 'w') as model_file:
+                            model_file.write(model_data)
+                        
+                        print(f"Client {client_id} stored model at {model_path}")
         except Exception as e:
             print(f"Client {client_id} encountered an error during receive: {e}")
         finally:

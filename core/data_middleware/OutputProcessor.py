@@ -50,9 +50,6 @@ class OutputProcessor:
         output['data'] = output_data
         return output
         
-        
-            
-        return 
     def generate_model_directory_from_model_id(self, model_id_list ):
         res = []
         model_id_list = [0,1]
@@ -65,10 +62,6 @@ class OutputProcessor:
             res.append(temp_path)
         return res
             
-        
-        
-        
-        pass
     def generate_task_list_from_task_id_list(self, task_id_list):
         res = []
         pass
