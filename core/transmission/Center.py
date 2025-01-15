@@ -129,8 +129,9 @@ class EdgeCommunicator:
     
     def process_model_file_transmission(self, client_index, file_path):
         """
-        发送模型文件到指定的客户端
+        send model file to client by index, for model transmission finishied , the task offloading can continue
         """
+        print(" get in process model function")
         if str(client_index) not in self.clients_index_ip_dict:
             print(f"No client with index {client_index}")
             return
@@ -140,14 +141,15 @@ class EdgeCommunicator:
         if not os.path.exists(file_path):
             print(f"File {file_path} does not exist")
             return
-
+        
         file_size = os.path.getsize(file_path)
         file_name = os.path.basename(file_path)
-
+        print("find file path {file_path} , file size {file_size}  and file name {file_name}")
         # 发送文件元数据
         metadata = self.generate_meta_data(DistributionType.MODEL, file_name = file_name, file_size=file_size)
-        
+        print(f"model transmission meta data : {metadata}")
         metadata = json.dumps(metadata,cls=EnumEncoder).encode('utf-8')
+        # format in 4 bytes
         client_socket.sendall(struct.pack('>I', len(metadata)))
         client_socket.sendall(metadata)
 
@@ -202,7 +204,7 @@ class EdgeCommunicator:
                 elif mode == DistributionType.TASK:
                     # task_transmission
                     print(f"Sent TASK message to client {index}")
-                    self.process_task_message_transmission(client_socket, message)
+                    self.process_task_message_transmission(client_socket, message['data'])
             except Exception as e:
                 print(f"Error sending message to client {index}: {e}")
                 break
@@ -221,10 +223,8 @@ if __name__ == "__main__":
     communicator.establish_connection()
     # 算法实际的迭代过程 和任务下发有关
     message_list = {"mode":DistributionType.TASK, "data" : [{"token": "token1", "true_value": "value1"},{"token": "token2", "true_value": "value2"}]}
+    model_message = {
+        "mode": DistributionType.MODEL,
+        "file_path": "/mnt/data/workspace/LLM_Distribution_Center/model/models/distilBert/distilgpt2.IQ3_M.gguf"
+    }
     communicator.send_task_message_to_client(1, message_list)
-    time.sleep(2)
-    communicator.send_task_message_to_client(1, message_list)
-    # communicator.send_task_message_to_client(0, {
-    #     "mode": DistributionType.MODEL,
-    #     "file_path": "/path/to/your/model_file.bin"
-    # })

@@ -83,13 +83,13 @@ class Client_Connection:
             print(f"Client {client_id} ready to receive data.")
             
             while True:
-                # parse meta data
+                # parse meta data length
                 length_bytes = client_socket.recv(4)
                 if not length_bytes:
                     break
                 
                 message_length = struct.unpack('>I', length_bytes)[0]
-                # Now, receive the full message
+                # parse meta data
                 print(f"Client {client_id} received message length: {message_length}")
                 message_bytes = client_socket.recv(message_length)
                 message = json.loads(message_bytes.decode('utf-8'))
@@ -97,7 +97,8 @@ class Client_Connection:
                 mode = message.get('mode')
                 
                 if mode == DistributionType.MODEL.value:
-                    # model processing 
+                    print("client recieving model")
+                    # process model transmission with client_socket
                     self.handle_file_transfer(client_socket, message, client_id)
                 elif mode == DistributionType.TASK.value:
                     # task processing
@@ -117,7 +118,7 @@ class Client_Connection:
         file_size = metadata['file_size']
         file_path = os.path.join(self.models_directory, file_name)
 
-        print(f"Client {client_id} preparing to receive file: {file_name}")
+        print(f"Client {client_id} handle_file_transfer function: {file_name}")
 
         received_size = 0
         with open(file_path, 'wb') as file:
