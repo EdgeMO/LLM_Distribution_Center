@@ -4,24 +4,28 @@ import json
 import socket
 import os 
 import sys
+import struct
 import csv
 from queue import Queue
 current_working_directory = os.getcwd()
 sys.path.append(current_working_directory)
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
 from common_tool.init import *
 from config.type import DistributionType, TaskType, EnumEncoder
+
 class Client_Connection:
     def __init__(self, config_path):
         self.server_config = client_server_config_init(config_path)
         self.server_ip = self.server_config.get('server_ip', None)
         self.server_port = self.server_config.get('server_port', None)
         self.task_queue = Queue()
-        self.models_directory = '/models'
-        self.csv_path = 'metrics.csv'
-        os.makedirs(self.models_directory, exist_ok=True)  # 确保模型目录存在
-        
+        self.models_directory = "downloaded_models"
+        os.makedirs(self.models_directory, exist_ok=True)
+        self.csv_path = 'metrics.csv'        # 确保模型目录存在
+        self.chunk_size = 8192  # Matching the server's chunk size
+    
     def client_send_thread(self, client_socket, client_id):
         try:
             print(f"Client {client_id} connected to server for sending.")
@@ -79,35 +83,54 @@ class Client_Connection:
             print(f"Client {client_id} ready to receive data.")
             
             while True:
-                data = client_socket.recv(1024)
-                if not data:
+                # parse meta data
+                length_bytes = client_socket.recv(4)
+                if not length_bytes:
                     break
-
-                messages = json.loads(data.decode('utf-8'))
-                print(f"Client {client_id} received messages: {messages}")
-                for message in messages:
-                    message_type = message.get('mode')
-
-                    if message_type == DistributionType.TASK:
-                        # Handle text task
-                        self.task_queue.put(message)
-                        print(f"Client {client_id} received text task: {message}")
-                    elif message_type == DistributionType.MODEL:
-                        # Handle model data
-                        model_name = message.get('model_name', f'model_{client_id}.mdl')
-                        model_data = message.get('model_data', '')
-                        model_path = os.path.join(self.models_directory, model_name)
+                
+                message_length = struct.unpack('>I', length_bytes)[0]
+                # Now, receive the full message
+                print(f"Client {client_id} received message length: {message_length}")
+                message_bytes = client_socket.recv(message_length)
+                message = json.loads(message_bytes.decode('utf-8'))
+                # get the mode of the message
+                mode = message.get('mode')
+                
+                if mode == DistributionType.MODEL.value:
+                    # model processing 
+                    self.handle_file_transfer(client_socket, message, client_id)
+                elif mode == DistributionType.TASK.value:
+                    # task processing
+                    # example: Client 1 received : {'mode': 0, 'task_data': [{'mode': 0, 'task_type': 1, 'token': 'token1', 'true_value': 'value1'}, {'mode': 0, 'task_type': 0, 'token': 'token2', 'true_value': 'value2'}]}
+                    print(f"Client {client_id} received : {message}")
+                    self.task_queue.put(message)
                         
-                        with open(model_path, 'w') as model_file:
-                            model_file.write(model_data)
-                        
-                        print(f"Client {client_id} stored model at {model_path}")
+
         except Exception as e:
             print(f"Client {client_id} encountered an error during receive: {e}")
         finally:
             client_socket.close()
             print(f"Client {client_id} finished receiving data and disconnected.")
+            
+    def handle_file_transfer(self, client_socket, metadata, client_id):
+        file_name = metadata['file_name']
+        file_size = metadata['file_size']
+        file_path = os.path.join(self.models_directory, file_name)
 
+        print(f"Client {client_id} preparing to receive file: {file_name}")
+
+        received_size = 0
+        with open(file_path, 'wb') as file:
+            while received_size < file_size:
+                chunk = client_socket.recv(min(self.chunk_size, file_size - received_size))
+                if not chunk:
+                    break
+                file.write(chunk)
+                received_size += len(chunk)
+                print(f"Client {client_id} receiving: {received_size}/{file_size} bytes complete", end='\r')
+
+        print(f"\nClient {client_id} finished receiving file: {file_name}")
+            
     def process(self, num_clients):
         threads = []
         for i in range(num_clients):

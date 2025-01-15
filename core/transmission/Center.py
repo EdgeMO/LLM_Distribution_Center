@@ -7,6 +7,7 @@ center core workspace
 
 """
 
+import struct
 import socket
 import json
 import threading
@@ -27,15 +28,15 @@ class EdgeCommunicator:
         self.clients_index_ip_dict = {} # 用于存储所有的边缘节点的观测量
         self.lock = threading.Lock()  # 创建一个线程锁
         self.message_queues = {}  # 用来存储每个客户端的消息队列
+        self.chunk_size = 8192  # 8KB chunks for file transfer
 
     def establish_connection(self):
-        
         # 负责建立网路连接
         threading.Thread(target=self.server_accept_all_connections).start()
         time.sleep(5)  # 等待服务器线程启动
     
 
-    def receive_from_client_(self, client_socket, index):
+    def receive_from_client_worker(self, client_socket, index):
         """每有来自终端的信息的时候，更新本地的观测观测量
 
         Args:
@@ -67,7 +68,7 @@ class EdgeCommunicator:
             except json.JSONDecodeError:
                 print(f"JSON decode error from client {index}.")
     
-    def send_message_to_client(self, index, message):
+    def send_task_message_to_client(self, index, message):
         """ send message to client by index, e.g. insert message into queue
 
         Args:
@@ -79,17 +80,6 @@ class EdgeCommunicator:
             self.message_queues[str(index)].put(message)
         else:
             print(f"No client with index {index} is connected.")
-  
-    def send_to_client_(self, client_socket, index):
-        """专门的线程从队列中取消息并发送到客户端"""
-        while True:
-            try:
-                message = self.message_queues[str(index)].get()
-                message_json = json.dumps(message, cls=EnumEncoder)
-                client_socket.sendall(message_json.encode('utf-8'))  # 假设消息是字符串
-            except Exception as e:
-                print(f"Error sending message to client {index}: {e}")
-                break
     
     def server_accept_all_connections(self):
         """
@@ -116,15 +106,108 @@ class EdgeCommunicator:
             print(f"Accepted connection from {ip}:{port} with index {index}")
             
             # 开启线程，接收来自client 端的消息
-            client_thread = threading.Thread(target=self.receive_from_client_, args=(client_socket, index))
+            client_thread = threading.Thread(target=self.receive_from_client_worker, args=(client_socket, index))
             client_thread.daemon = True
             client_thread.start()
             # 开启线程，给client 端发送消息
-            sending_thread = threading.Thread(target=self.send_to_client_, args=(client_socket, index))
+            sending_thread = threading.Thread(target=self.send_to_client_worker, args=(client_socket, index))
             sending_thread.daemon = True
             sending_thread.start()
 
             index += 1
+    
+    def generate_meta_data(self, enum, file_name = None, file_size = None, task_message = None):
+        res = {}
+        if enum == DistributionType.MODEL:
+            res['mode'] = DistributionType.MODEL
+            res['file_name'] = file_name
+            res['file_size'] = file_size
+        elif enum == DistributionType.TASK:
+            res['mode'] = DistributionType.TASK
+            res['tasks'] = task_message
+        return res
+    
+    def process_model_file_transmission(self, client_index, file_path):
+        """
+        发送模型文件到指定的客户端
+        """
+        if str(client_index) not in self.clients_index_ip_dict:
+            print(f"No client with index {client_index}")
+            return
+
+        client_socket = self.clients_index_ip_dict[str(client_index)]['socket']
+
+        if not os.path.exists(file_path):
+            print(f"File {file_path} does not exist")
+            return
+
+        file_size = os.path.getsize(file_path)
+        file_name = os.path.basename(file_path)
+
+        # 发送文件元数据
+        metadata = self.generate_meta_data(DistributionType.MODEL, file_name = file_name, file_size=file_size)
+        
+        metadata = json.dumps(metadata,cls=EnumEncoder).encode('utf-8')
+        client_socket.sendall(struct.pack('>I', len(metadata)))
+        client_socket.sendall(metadata)
+
+        # 发送文件内容
+        with open(file_path, 'rb') as file:
+            sent = 0
+            while sent < file_size:
+                chunk = file.read(self.chunk_size)
+                if not chunk:
+                    break
+                client_socket.sendall(chunk)
+                sent += len(chunk)
+                print(f"Sent {sent}/{file_size} bytes to client {client_index}")
+
+        print(f"File {file_name} sent successfully to client {client_index}")
+
+    def process_task_message_transmission(self, client_socket, message):
+        # send meta data
+        task_message = self.generate_meta_data(DistributionType.TASK, task_message=message)
+
+        # Serialize the message
+        message_json = json.dumps(task_message, cls=EnumEncoder)
+        message_bytes = message_json.encode('utf-8')
+
+        # Send the length prefix
+        client_socket.sendall(struct.pack('>I', len(message_bytes)))
+
+        # Send the actual message
+        client_socket.sendall(message_bytes)
+
+        
+    
+    def send_to_client_worker(self, client_socket, index):
+        """ 
+        worker function for sending message to client from message queue
+
+        Args:
+            client_socket (_type_): socket when connection established
+            index (_type_): edge node index 
+        """
+        while True:
+            try:
+                message = self.message_queues[str(index)].get()
+                print("server message", message)
+                
+                mode = message.get('mode')
+                print(f"Sending message to client {index} with mode {mode} type of node {type(mode)}")
+                if mode == DistributionType.MODEL:
+                    print("send model file to index {index}")
+                    # model transmission
+                    self.process_model_file_transmission(index, message['file_path'])
+                elif mode == DistributionType.TASK:
+                    # task_transmission
+                    print(f"Sent TASK message to client {index}")
+                    self.process_task_message_transmission(client_socket, message)
+            except Exception as e:
+                print(f"Error sending message to client {index}: {e}")
+                break
+        
+        
     def get_observation(self):
         """获取所有边缘节点的观测量"""
         with self.lock:
@@ -137,8 +220,11 @@ if __name__ == "__main__":
     communicator = EdgeCommunicator(config_file_path='config/Running_config.json')
     communicator.establish_connection()
     # 算法实际的迭代过程 和任务下发有关
-    message_list = [
-        {"mode":DistributionType.TASK,"task_type": TaskType.QuestionAnswering, "token": "token1", "true_value": "value1"},
-        {"mode":DistributionType.TASK,"task_type": TaskType.TextClassification, "token": "token2", "true_value": "value2"}
-    ]
-    communicator.send_message_to_client(1, message_list)
+    message_list = {"mode":DistributionType.TASK, "data" : [{"token": "token1", "true_value": "value1"},{"token": "token2", "true_value": "value2"}]}
+    communicator.send_task_message_to_client(1, message_list)
+    time.sleep(2)
+    communicator.send_task_message_to_client(1, message_list)
+    # communicator.send_task_message_to_client(0, {
+    #     "mode": DistributionType.MODEL,
+    #     "file_path": "/path/to/your/model_file.bin"
+    # })
