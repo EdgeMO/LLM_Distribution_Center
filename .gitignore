@@ -12,6 +12,10 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+*.zip
+*.txt
+data.csv
+test.csv
 develop-eggs/
 dist/
 downloads/
