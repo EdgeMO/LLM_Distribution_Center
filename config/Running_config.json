@@ -33,5 +33,12 @@
     "server_ip_config":{
         "server_ip" : "127.0.0.1",
         "server_port" : 12345
+    },
+    "task_type_config":{
+        "TC":{},
+        "NER":{},
+        "QA":{},
+        "TL":{},
+        "SG":{}
     }
 }

@@ -26,7 +26,7 @@ code implementation of center
             * O: None 
             * B-\<ENTITY\> Beginning part of certain words
             * I-\<ENTITY\> Internal part of certain words
-        ENTITY : PER(Person Name) LOC(Location) ORG(Organization)  MISC(Miscellaneous)
+        * ENTITY : PER(Person Name) LOC(Location) ORG(Organization)  MISC(Miscellaneous)
     * **2 QA (Question Answering)**
         * reference_value: ideal standard answer
     * **3 TS (Translation Chinese to English)** 

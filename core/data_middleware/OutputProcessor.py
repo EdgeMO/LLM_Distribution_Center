@@ -13,8 +13,8 @@ class OutputProcessor:
     generate output data and transmission config well formated for networking transmission 
     use queue for task and model distribution
     """
-    def __init__(self):
-        self.center_model_config, self.model_directory, self.output_processor_task_source_type, self.task_input_directory = output_processor_config_init('config/Running_config.json')
+    def __init__(self, config_file_path):
+        self.center_model_config, self.model_directory, self.output_processor_task_source_type, self.task_input_directory = output_processor_config_init(config_file_path)
         print("output processor init sucess")
     
     
@@ -61,7 +61,11 @@ class OutputProcessor:
             temp_path = base_model_path + f"/{model_name}" + f"/{model_name}.gguf"
             res.append(temp_path)
         return res
-            
+    
+    def generate_formated_algorithm_output_for_task_offloading(self,algorithm_output):
+        
+        pass
+    
     def generate_task_list_from_task_id_list(self, task_id_list):
         res = []
         pass

@@ -1,8 +1,11 @@
 from enum import Enum
 import json
 class TaskType(Enum):
-    TextClassification = 0
-    QuestionAnswering = 1
+    TC = 0
+    NER = 1
+    QA = 2
+    TL = 3
+    SG = 4
 
 class DistributionType(Enum):
     TASK = 0  # 表示是任务下发
