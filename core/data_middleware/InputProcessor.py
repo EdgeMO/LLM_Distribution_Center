@@ -40,6 +40,7 @@ class InputProcessor:
     def generate_query_word_from_task_type(self, TASK_TYPE):
         """
         generate query word from task type, fixed query mode, without considering the output format
+        TASK_TYPE : 0 : TC, 1 : NER, 2 : QA, 3 : TL, 4 : SG
         """
         TASK_TYPE  = TaskType(TASK_TYPE)
         if TASK_TYPE == TaskType.TC:
@@ -64,4 +65,5 @@ class InputProcessor:
 if __name__ == "__main__":
     input = InputProcessor('/mnt/data/workspace/LLM_Distribution_Center/data/example.csv')
     res = input.generate_task_set_for_each_timestamp(task_num = 10)
+    res2 = input.generate_query_word_from_task_type(2)
     pass

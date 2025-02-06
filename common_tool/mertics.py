@@ -252,16 +252,31 @@ class Metrics:
     def QA_Metric(self, prediction, reference ):
         return self.SG_Metric(prediction, reference)
     
-    def process(type, prediction, reference):
+    def process(self, type, prediction, reference):
+        """
+        generate the score of single task request
+
+        Args:
+            type (_type_): the number of specific task type 
+            prediction (_type_): model output
+            reference (_type_): true value from dataset
+        """
+        score = 0
+        if type == 0:
+            score = self.TC_Metric(prediction, reference)
+        if type == 1:
+            score = self.NER_Metric(prediction, reference)
+        if type == 2:
+            score = self.QA_Metric(prediction, reference)
+        if type == 3:
+            score = self.TL_Metric(prediction, reference)
+        if type ==4:
+            score = self.SG_Metric(prediction, reference)
+        return score
         
-        
-        
-        pass
     
         
         
 if __name__ == "__main__":
-    metrics = Metrics()
-    res = metrics.SG_Metric("We can find our atmosphere of our solar nebula! It's a lost and there due to the explosion of the Kuiper belt.We could be on Mars where the asteroid belt is in the Sun in the Solar system. (In the Earth's atmosphere, but the Sun's moon so massive.We have not yet found for a planet after the Kuiper belt because of the asteroids found in the moon in the Sun. And when we did not a planet that the asteroid belt The moon as of the Sun's Sun so we had not found a planet.", "['C\n']")
-    print(res)
-    pass
+    metrics_calculator = Metrics()
+    
