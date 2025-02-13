@@ -32,10 +32,12 @@ class CMD:
             result = subprocess.run(command, capture_output=True, text=True, check=True)
             print(result.stdout)
             temp_res = result.stdout
+            return temp_res
         except subprocess.CalledProcessError as e:
             print(f"Error occurred: {e}")
             with open("error.txt", "a+") as file:
                 file.write(e.stderr)
+            return ''
 
 
 
@@ -45,10 +47,12 @@ class CMD:
         
 if __name__ == '__main__':
     cmd = CMD()
+    
     query_words = "please answer the following question based on the text provided without explanation \n\n Question:"
-    question = f"Question: who is the actor that plays dr. sean murphy"
+    question = f"what's the final sum of 2 + 2"
     llama_cli_path = "/mnt/data/workspace/LLM_Distribution_Edge/build/bin/llama-cli"
-    model_path = "/mnt/data/workspace/LLM_Distribution_Center/model/models/gpt4all/ggml-nomic-ai-gpt4all-falcon-Q4_0.gguf"
-    cmd.run_task_process_cmd(query_words,question,llama_cli_path,model_path)
-    cmd.get_available_memory()
+    model_path = "/mnt/data/workspace/LLM_Distribution_Center/model/models/t5/DPOB-NMTOB-7B.i1-Q4_K_M.gguf"
+    res = cmd.run_task_process_cmd(query_words,question,llama_cli_path,model_path)
+    memory_left_get = cmd.get_available_memory()
+    #print(res)
     pass

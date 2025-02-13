@@ -222,9 +222,9 @@ if __name__ == "__main__":
     communicator = EdgeCommunicator(config_file_path='config/Running_config.json')
     communicator.establish_connection()
     # 算法实际的迭代过程 和任务下发有关
-    message_list = {"mode":DistributionType.TASK, "data" : [{"token": "token1", "true_value": "value1"},{"token": "token2", "true_value": "value2"}]}
+    message_list = {"mode":DistributionType.TASK, "data" : [{"task_type":2,"token": "token1", "true_value": "value1"},{"task_type":1,"token": "token2", "true_value": "value2"}]}
     model_message = {
         "mode": DistributionType.MODEL,
         "file_path": "/mnt/data/workspace/LLM_Distribution_Center/model/models/distilBert/distilgpt2.IQ3_M.gguf"
     }
-    communicator.send_task_message_to_client(1, message_list)
+    communicator.send_task_message_to_client(1, model_message)
