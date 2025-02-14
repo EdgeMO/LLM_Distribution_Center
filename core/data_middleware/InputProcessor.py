@@ -84,7 +84,7 @@ class InputProcessor:
         avg_sentence_length = word_count / sentence_count
         max_depth = max(len(list(token.ancestors)) for token in doc)
 
-        #   适配任务类型
+        #   TBD   适配任务类型
         question_types = ['what', 'how', 'why', 'when', 'where', 'who']
         question_type = next((t for t in question_types if text.lower().startswith(t)), 'other')
 
