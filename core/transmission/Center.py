@@ -18,6 +18,11 @@ import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 from config.type import DistributionType, TaskType, EnumEncoder
+import logging
+
+# 在文件开头配置日志记录
+logging.basicConfig(filename='center_process.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 class EdgeCommunicator:
     def __init__(self, config_file_path, host='127.0.0.1', port=12345):
@@ -33,7 +38,7 @@ class EdgeCommunicator:
     def establish_connection(self):
         # 负责建立网路连接
         threading.Thread(target=self.server_accept_all_connections).start()
-        time.sleep(5)  # 等待服务器线程启动
+        time.sleep(10)  # 等待服务器线程启动
     
 
     def receive_from_client_worker(self, client_socket, index):
@@ -46,21 +51,24 @@ class EdgeCommunicator:
         while True:
             try:
                 #print(f"Waiting for data from client {index}...")
-                data = client_socket.recv(1024)
-                if not data:
-                    print(f"Client {index} disconnected.")
+                length_bytes = client_socket.recv(4)
+                if not length_bytes:
                     break
-
-                message = json.loads(data.decode('utf-8'))
-                if 'accuracy' in message and 'time' in message and 'memory_usage' in message:
-                    # 使用锁保护对共享字典的访问, 这里用来更新观测量
+                
+                message_length = struct.unpack('>I', length_bytes)[0]
+                # parse meta data
+                print(f"Client {index} received message length: {message_length}")
+                message_bytes = client_socket.recv(message_length)
+                
+                message = json.loads(message_bytes.decode('utf-8'))
+                
+                single_observation = message.get('observation', None)
+                if single_observation:
                     with self.lock:
-                        self.clients_index_ip_dict[str(index)]['accuracy'] = message['accuracy']
-                        self.clients_index_ip_dict[str(index)]['time'] = message['time']
-                        self.clients_index_ip_dict[str(index)]['memory_usage'] = message['memory_usage']
-                    
+                        self.clients_index_ip_dict[str(index)]['observation'] = single_observation
                     # 打印接收到的数据
-                    print(f"Received data from client {index}: {self.clients_index_ip_dict[str(index)]['accuracy']}")
+                logging.info(f"Received data from client {index}: type {type(message)} message = {message}")
+                logging.info(f"get_observation: {self.get_client_observation_by_index(index)}")
 
             except ConnectionResetError:
                 print(f"Client {index} forcibly closed the connection.")
@@ -94,6 +102,7 @@ class EdgeCommunicator:
 
         index = 0 #边缘节点编号
         while True:
+            # wait for connection, establish new connection for each edge node
             client_socket, addr = self.server_socket.accept()
             ip, port = addr
             with self.lock:
@@ -210,10 +219,10 @@ class EdgeCommunicator:
                 break
         
         
-    def get_observation(self):
+    def get_client_observation_by_index(self,index):
         """获取所有边缘节点的观测量"""
         with self.lock:
-            return self.clients_index_ip_dict
+            return self.clients_index_ip_dict[str(index)]['observation']
 
 
 
@@ -222,9 +231,9 @@ if __name__ == "__main__":
     communicator = EdgeCommunicator(config_file_path='config/Running_config.json')
     communicator.establish_connection()
     # 算法实际的迭代过程 和任务下发有关
-    message_list = {"mode":DistributionType.TASK, "data" : [{"task_type":2,"token": "token1", "true_value": "value1"},{"task_type":1,"token": "token2", "true_value": "value2"}]}
+    message_list = {"sequence":0,"mode":DistributionType.TASK, "data" : [{"task_type":0,"token": "i can only be so abrasive towards people like brock lawly and the numerous nameless fundies before i start feeling lame", "reference_value": "0"},{"task_type":2,"token": "who captained the first european ship to sail around the tip of africa", "reference_value": "['Bartolomeu Dias']"}]}
     model_message = {
         "mode": DistributionType.MODEL,
         "file_path": "/mnt/data/workspace/LLM_Distribution_Center/model/models/distilBert/distilgpt2.IQ3_M.gguf"
     }
-    communicator.send_task_message_to_client(1, model_message)
+    communicator.send_task_message_to_client(0, message_list)

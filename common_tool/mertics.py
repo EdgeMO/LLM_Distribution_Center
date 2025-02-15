@@ -19,14 +19,16 @@ class Metrics:
         Returns:
             _type_: 0 or 1 
         """
+        if type(reference) != str:
+            reference = str(reference)
         # store all the categories if example csv
         EMOTION_CATEGORIES = {
-            0: "sad",
-            1: "happy",
-            2: "love",
-            3: "angry",
-            4: "scared",
-            5: "surprise"
+            "0": "sad",
+            "1": "happy",
+            "2": "love",
+            "3": "angry",
+            "4": "scared",
+            "5": "surprise"
         }
         # store all the keywords for single category
         EMOTION_KEYWORDS = {
@@ -122,10 +124,12 @@ class Metrics:
             reference (_type_): LOC PER MISC
         """
         prediction = prediction.lower()
+        if type(reference) != str:
+            reference = str(reference)
         EMOTION_CATEGORIES = {
-            0: "location",
-            1: "person",
-            2: "miscellaneous"
+            "0": "location",
+            "1": "person",
+            "2": "miscellaneous"
         }
         reference_type = reference.lower()
         if reference_type in prediction:

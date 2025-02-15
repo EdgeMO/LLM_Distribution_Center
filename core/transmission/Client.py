@@ -1,16 +1,26 @@
 import threading
 import time
+import datetime
 import json
 import socket
 import os 
 import sys
 import struct
 import csv
-from queue import Queue
 current_working_directory = os.getcwd()
 sys.path.append(current_working_directory)
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from queue import Queue
+from common_tool.cmd import CMD
+from common_tool.mertics import Metrics
+from data_middleware.InputProcessor import InputProcessor
+import logging
+
+# 在文件开头配置日志记录
+logging.basicConfig(filename='client_process.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
 
 from common_tool.init import *
 from config.type import DistributionType, TaskType, EnumEncoder
@@ -20,68 +30,118 @@ class Client_Connection:
         self.server_config = client_server_config_init(config_path)
         self.server_ip = self.server_config.get('server_ip', None)
         self.server_port = self.server_config.get('server_port', None)
-        self.task_queue = Queue()
+        
         self.models_directory = "downloaded_models"
         os.makedirs(self.models_directory, exist_ok=True)
         self.csv_path = 'metrics.csv'        # 确保模型目录存在
         self.chunk_size = 8192  # Matching the server's chunk size
-    
-    def client_send_thread(self, client_socket, client_id):
-        try:
-            print(f"Client {client_id} connected to server for sending.")
+        
+        self.start_time_stamp = datetime.datetime.now().timestamp()
+        self.cmd_operator = CMD()
+        self.input_processor = InputProcessor()
+        self.metrics_operator = Metrics()
+        
+        #
+        self.task_queue = Queue()
+        self.sequence_queue = Queue()
+        
+        # mrtrics
+        self.client_sum_task_accuravy_score = 0
+        self.total_task_num = 0
+        
+    def generate_model_path(self):
+        
+        
+        return "/mnt/data/workspace/LLM_Distribution_Center/model/models/t5/DPOB-NMTOB-7B.i1-Q4_K_M.gguf"
+    def generate_llama_cli_path(self):
+        
+        
+        return "/mnt/data/workspace/LLM_Distribution_Edge/build/bin/llama-cli"
+    def single_process(self):
+        """
+        pick one task set from queue and process it , get related metrics and current status
+        """
+        
+        # get task batch from task_queue
+        task_batch = self.task_queue.get()
+        
+        # get task list from task_batch
+        task_list = task_batch.get('tasks',[])
+        num_task_list = len(task_list)
+        
+        # metrics calculation
+        # received timestamp for single batch
+        received_timestamp_for_single_batch = task_batch.get('receive_timestamp')
+        self.total_task_num += num_task_list
+        single_batch_sum_task_accuravy_score = 0
+        average_local_processing_time = 0
+
+        #logging.info(f"task_list =  {task_list}")
+        
+        # get model path and llama_cli_path  for cmd running      
+        model_path = self.generate_model_path()
+        llama_cli_path = self.generate_llama_cli_path()
+        
+        for task in task_list:
+            self.total_task_num += 1
+            # cmd进行任务处理
+            token_type = task.get('task_type')
+            token = task.get('token')
+            reference_value = task.get('reference_value')
+            query_prefix = self.input_processor.generate_query_word_from_task_type(token_type)
+            # 获取单次prediction的处理结果
+            prediction = self.cmd_operator.run_task_process_cmd(query_prefix=query_prefix, query_word=token, llama_cli_path = llama_cli_path, model_path=model_path)
             
-            last_position = 0
-            while True:
-                with open(self.csv_path, 'r') as f:
-                    f.seek(last_position)
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        accuracy = float(row['accuracy'])
-                        time_delay = float(row['time'])
-                        memory_usage = float(row['memory_usage'])
-
-                        data_to_send = {
-                            'accuracy': accuracy,
-                            'time': time_delay,
-                            'memory_usage': memory_usage
-                        }
-                        data_json = json.dumps(data_to_send)
-                        client_socket.sendall(data_json.encode('utf-8'))
-
-                        print(f"Client {client_id} sent data: {data_to_send}")
-                        time.sleep(1)  # 控制发送频率
-
-                    last_position = f.tell()  # 记录文件当前位置以便下次读取
-
-                time.sleep(1)  # 控制文件检查频率
-            
-            print(f"Client {client_id} finished sending data.")
-        except Exception as e:
-            print(f"Client {client_id} encountered an error during send: {e}")
+            accuracy_score = self.metrics_operator.process(type = token_type, prediction = prediction, reference = reference_value)
+            single_batch_sum_task_accuravy_score += accuracy_score
+            logging.info(f"token = {token}, prediction = {prediction} accuracy_score = {accuracy_score}")
+        
+        
+        
+        # res metrics calculation
+        finished_single_batch_timestamp = datetime.datetime.now().timestamp()
+        free_disk_space = self.cmd_operator.get_free_disk_space()
+        self.client_sum_task_accuravy_score += single_batch_sum_task_accuravy_score
+        average_local_processing_time_per_task = (finished_single_batch_timestamp - received_timestamp_for_single_batch) / num_task_list
+        average_batch_accuracy_score_per_batch = single_batch_sum_task_accuravy_score / num_task_list
+        
+        
+        res = {
+            "average_local_processing_time_per_task":average_local_processing_time_per_task,
+            "average_batch_accuracy_score_per_batch":average_batch_accuracy_score_per_batch,
+            "free_disk_space":free_disk_space
+        }
+        
+        logging.info(f"res = {res}")
+        return res
             
     def client_send_thread_simulation(self, client_socket, client_id):
         try:
-            print(f"Client {client_id} connected to server for sending.")
+            while True:
+                print(f"Client {client_id} connected to server for sending.")
+                data_to_send = self.sequence_queue.get()
+                # # 模拟发送数据
+                # for i in range(10):
+                #     data_to_send = {
+                #         'accuracy': 0.9 + client_id * 0.01,
+                #         'time': 100 + client_id * 5,
+                #         'memory_usage': 200 + client_id * 10
+                #     }
+                message_json = json.dumps(data_to_send)
+                message_bytes = message_json.encode('utf-8')
 
-            # 模拟发送数据
-            for i in range(10):
-                data_to_send = {
-                    'accuracy': 0.9 + client_id * 0.01,
-                    'time': 100 + client_id * 5,
-                    'memory_usage': 200 + client_id * 10
-                }
-                data_json = json.dumps(data_to_send)
-                client_socket.sendall(data_json.encode('utf-8'))
+                # Send the length prefix
+                client_socket.sendall(struct.pack('>I', len(message_bytes)))
+                client_socket.sendall(message_bytes)
                 time.sleep(1)
-            
-            print(f"Client {client_id} finished sending data.")
+                
+                print(f"Client {client_id} finished sending data.")
         except Exception as e:
             print(f"Client {client_id} encountered an error during send: {e}")
 
     def client_receive_thread(self, client_socket, client_id):
         try:
             print(f"Client {client_id} ready to receive data.")
-            
             while True:
                 # parse meta data length
                 length_bytes = client_socket.recv(4)
@@ -93,22 +153,33 @@ class Client_Connection:
                 print(f"Client {client_id} received message length: {message_length}")
                 message_bytes = client_socket.recv(message_length)
                 message = json.loads(message_bytes.decode('utf-8'))
+                # record current timestamp
+                temp_timestamp = datetime.datetime.now().timestamp()
+                
                 # get the mode of the message
                 mode = message.get('mode')
-                
                 if mode == DistributionType.MODEL.value:
                     print("client recieving model")
-                    # process model transmission with client_socket
+                    # entry model transmission with client_socket
                     self.handle_file_transfer(client_socket, message, client_id)
                 elif mode == DistributionType.TASK.value:
-                    # task processing
-                    # example: Client 1 received : {'mode': 0, 'task_data': [{'mode': 0, 'task_type': 1, 'token': 'token1', 'true_value': 'value1'}, {'mode': 0, 'task_type': 0, 'token': 'token2', 'true_value': 'value2'}]}
+                    # record received timestamp
+                    sequence = message.get('sequence',0)
+                    message['receive_timestamp'] = temp_timestamp
+                    # example: Client 1 received : {'mode': 0, 'tasks': [{'task_type': 2, 'token': 'token1', 'true_value': 'value1'}, {'task_type': 1, 'token': 'token2', 'true_value': 'value2'}]}
                     print(f"Client {client_id} received : {message}")
                     self.task_queue.put(message)
+                    single_res = self.single_process()
+                    temp_res = {
+                        "sequence":sequence,
+                        "observation":single_res
+                    }
+                    self.sequence_queue.put(temp_res)
                         
 
         except Exception as e:
             print(f"Client {client_id} encountered an error during receive: {e}")
+            logging.error(f"Client {client_id} encountered an error during receive: {e}")
         finally:
             client_socket.close()
             print(f"Client {client_id} finished receiving data and disconnected.")
@@ -132,7 +203,7 @@ class Client_Connection:
 
         print(f"\nClient {client_id} finished receiving file: {file_name}")
             
-    def process(self, num_clients):
+    def entry(self, num_clients):
         threads = []
         for i in range(num_clients):
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -152,4 +223,6 @@ class Client_Connection:
 # 使用函数模拟多个客户端
 if __name__ == "__main__":
     client_simulator = Client_Connection(config_path = 'config/Running_config.json')
-    client_simulator.process(num_clients = 5)
+    client_simulator.entry(num_clients = 1)
+    # client_simulator.task_queue.put([{"task_type":0,"token": "i can only be so abrasive towards people like brock lawly and the numerous nameless fundies before i start feeling lame", "reference_value": "0"},{"task_type":2,"token": "who captained the first european ship to sail around the tip of africa", "reference_value": "['Bartolomeu Dias']"}])
+    # client_simulator.single_process()

@@ -1,5 +1,6 @@
 import subprocess
 import psutil
+import shutil
 class CMD:
     def __init__(self):
         
@@ -12,6 +13,11 @@ class CMD:
         mem = psutil.virtual_memory()
         left_mem = mem.available / (1024 ** 3)
         return left_mem
+    def get_free_disk_space(self, path = "/"):
+        total, used, free = shutil.disk_usage(path)
+        res = free / (2 ** 30)
+        return res
+        pass
     def run_task_process_cmd(self,query_prefix,query_word,llama_cli_path,model_path):
         """ for edge node to run task process command
 
@@ -47,7 +53,7 @@ class CMD:
         
 if __name__ == '__main__':
     cmd = CMD()
-    
+    res = cmd.get_free_disk_space()
     query_words = "please answer the following question based on the text provided without explanation \n\n Question:"
     question = f"what's the final sum of 2 + 2"
     llama_cli_path = "/mnt/data/workspace/LLM_Distribution_Edge/build/bin/llama-cli"

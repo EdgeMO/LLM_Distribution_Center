@@ -18,16 +18,13 @@ class InputProcessor:
     """
     regulate the input data from different sources and generate output data compatible for the algorithm input
     """
-    def __init__(self, file_path = None):
+    def __init__(self, file_path = "/mnt/data/workspace/LLM_Distribution_Center/data/example.csv"):
         """
         Args:
-            input_type (_type_): indicates the type of the input data  0 : local_file, 1 : tcp transmission
-            file_path (_type_): local file path, activates when input_type is 0
+            file_path (_type_): local file path
             
-            1 : TBD
         """
         self.file_path = file_path
-        self.task_set_size = 10
         self.random_state = 930
         self.df = pd.read_csv(file_path)
         self.common_words = set(['the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'I'])
@@ -84,10 +81,6 @@ class InputProcessor:
         avg_sentence_length = word_count / sentence_count
         max_depth = max(len(list(token.ancestors)) for token in doc)
 
-        #   TBD   适配任务类型
-        question_types = ['what', 'how', 'why', 'when', 'where', 'who']
-        question_type = next((t for t in question_types if text.lower().startswith(t)), 'other')
-
         # 6. 上下文依赖性
         context_words = ['it', 'this', 'that', 'these', 'those', 'he', 'she', 'they']
         context_dependency = len(re.findall(r'\b(' + '|'.join(context_words) + r')\b', text.lower())) / word_count
@@ -102,21 +95,18 @@ class InputProcessor:
         # 9. 特殊符号和数字比例
         special_char_ratio = len(re.findall(r'[^a-zA-Z0-9\s]', text)) / char_count
         digit_ratio = len(re.findall(r'\d', text)) / char_count
-
+        
+        vocab_complexity = 0.5 * rare_words_ratio + 0.5 * avg_sentence_length
+        ambiguity = ambiguity_score
+        info_density = information_density
+        special_char_ratio_value =  0.5 * special_char_ratio + 0.5 * digit_ratio
         return {
-            "char_count": char_count,
-            "word_count": word_count,
-            "sentence_count": sentence_count,
-            "avg_word_length": avg_word_length,
-            "rare_words_ratio": rare_words_ratio,
-            "avg_sentence_length": avg_sentence_length,
-            "max_dependency_depth": max_depth,
-            "question_type": question_type,
-            "context_dependency": context_dependency,
-            "ambiguity_score": ambiguity_score,
-            "information_density": information_density,
-            "special_char_ratio": special_char_ratio,
-            "digit_ratio": digit_ratio
+            'vocab_complexity': vocab_complexity,
+            'syntax_complexity': max_depth,
+            'context_dependency': context_dependency,
+            'ambiguity': ambiguity,
+            'info_density': info_density,
+            'special_char_ratio': special_char_ratio_value
         }
 
 
