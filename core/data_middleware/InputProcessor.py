@@ -101,15 +101,35 @@ class InputProcessor:
         info_density = information_density
         special_char_ratio_value =  0.5 * special_char_ratio + 0.5 * digit_ratio
         return {
-            'vocab_complexity': vocab_complexity,
-            'syntax_complexity': max_depth,
+            'vocabulary_complexity': vocab_complexity,
+            'syntactic_complexity': max_depth,
             'context_dependency': context_dependency,
-            'ambiguity': ambiguity,
-            'info_density': info_density,
-            'special_char_ratio': special_char_ratio_value
+            'ambiguity_level': ambiguity,
+            'information_density': info_density,
+            'special_symbol_ratio': special_char_ratio_value
         }
-
-
+    def generate_offloading_message(self,edge_id_to_task_id_dict, task_set):
+        output = []
+        
+        for key, task_id_list in edge_id_to_task_id_dict.items():
+            res = {}
+            res['edge_id'] = key
+            task_set_for_edge = []
+            for task_id in task_id_list:
+                temp_res = {}
+                matching_tasks = [task for task in task_set if task.get("task_id") == task_id]
+                task_type = matching_tasks[0].get("task_type")
+                query_word = self.generate_query_word_from_task_type(task_type)
+                task_token = matching_tasks[0].get("task_token")
+                reference_value = matching_tasks[0].get("reference_value")
+                temp_res['task_id'] = task_id
+                temp_res['task_type'] = task_type
+                temp_res['task_token'] = query_word + task_token
+                temp_res['reference_value'] = reference_value
+                task_set_for_edge.append(temp_res)
+            res['task_set'] = task_set_for_edge
+            output.append(res)
+        return output
 if __name__ == "__main__":
     input = InputProcessor('/mnt/data/workspace/LLM_Distribution_Center/data/example.csv')
     res = input.generate_task_set_for_each_timestamp(task_num = 10)

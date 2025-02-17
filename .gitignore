@@ -10,6 +10,8 @@ __pycache__/
 *.so
 *.ipynb
 # Distribution / packaging
+*.lock
+/model/*
 .Python
 build/
 *.zip

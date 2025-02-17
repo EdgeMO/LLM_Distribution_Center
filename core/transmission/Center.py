@@ -218,7 +218,10 @@ class EdgeCommunicator:
                 print(f"Error sending message to client {index}: {e}")
                 break
         
-        
+    def get_overall_observation(self):
+        """获取所有边缘节点的观测量"""
+        with self.lock:
+            return self.clients_index_ip_dict
     def get_client_observation_by_index(self,index):
         """获取所有边缘节点的观测量"""
         with self.lock:

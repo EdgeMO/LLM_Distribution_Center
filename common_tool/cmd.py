@@ -31,7 +31,7 @@ class CMD:
             llama_cli_path,
             "-m", model_path,
             "-p", f"{query_prefix} {query_word}",
-            "-n", "128"
+            "-n","128"
         ]
         
         try:
@@ -53,12 +53,12 @@ class CMD:
         
 if __name__ == '__main__':
     cmd = CMD()
-    res = cmd.get_free_disk_space()
+    #res = cmd.get_free_disk_space()
     query_words = "please answer the following question based on the text provided without explanation \n\n Question:"
     question = f"what's the final sum of 2 + 2"
     llama_cli_path = "/mnt/data/workspace/LLM_Distribution_Edge/build/bin/llama-cli"
-    model_path = "/mnt/data/workspace/LLM_Distribution_Center/model/models/t5/DPOB-NMTOB-7B.i1-Q4_K_M.gguf"
+    model_path = "/mnt/data/workspace/LLM_Distribution_Center/model/HF/models--MaziyarPanahi--Qwen2.5-7B-Instruct-GGUF/snapshots/113085215169f69e309fa57d351d7e2b06e1350e/Qwen2.5-7B-Instruct.IQ1_M.gguf"
     res = cmd.run_task_process_cmd(query_words,question,llama_cli_path,model_path)
     memory_left_get = cmd.get_available_memory()
-    #print(res)
+    print(res)
     pass
