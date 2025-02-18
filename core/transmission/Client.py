@@ -60,18 +60,19 @@ class Client_Connection:
     def single_process(self):
         """
         pick one task set from queue and process it , get related metrics and current status
+        {'mode': 0, 'tasks': [{'task_id': 682, 'task_type': 1, 'task_token': 'Please identify the named entities in the following text. Classify entities into categories such as Person, Location, Organization, Miscellaneous \n\n Text:Widodo', 'reference_value': 'PER'}, {'task_id': 583, 'task_type': 1, 'task_token': 'Please identify the named entities in the following text. Classify entities into categories such as Person, Location, Organization, Miscellaneous \n\n Text:,', 'reference_value': 'MISC'}], 'receive_timestamp': 1739868580.523756}
         """
-        
+
         # get task batch from task_queue
-        task_batch = self.task_queue.get()
-        
-        # get task list from task_batch
-        task_list = task_batch.get('tasks',[])
+        origin_info = self.task_queue.get()
+        logging.info(f"origin_info = {origin_info}")
+        task_list = origin_info.get('tasks',{}).get('task_set',[])
+        logging.info(f"task_list = {task_list}")
         num_task_list = len(task_list)
         
         # metrics calculation
         # received timestamp for single batch
-        received_timestamp_for_single_batch = task_batch.get('receive_timestamp')
+        received_timestamp_for_single_batch = origin_info.get('receive_timestamp')
         self.total_task_num += num_task_list
         single_batch_sum_task_accuravy_score = 0
         average_local_processing_time = 0
@@ -86,7 +87,7 @@ class Client_Connection:
             self.total_task_num += 1
             # cmd进行任务处理
             token_type = task.get('task_type')
-            token = task.get('token')
+            token = task.get('task_token')
             reference_value = task.get('reference_value')
             query_prefix = self.input_processor.generate_query_word_from_task_type(token_type)
             # 获取单次prediction的处理结果
@@ -127,6 +128,7 @@ class Client_Connection:
                 #         'time': 100 + client_id * 5,
                 #         'memory_usage': 200 + client_id * 10
                 #     }
+                logging.info(f"Client {client_id} sending data from queue: {data_to_send}")
                 message_json = json.dumps(data_to_send)
                 message_bytes = message_json.encode('utf-8')
 
@@ -164,10 +166,9 @@ class Client_Connection:
                     self.handle_file_transfer(client_socket, message, client_id)
                 elif mode == DistributionType.TASK.value:
                     # record received timestamp
-                    sequence = message.get('sequence',0)
+                    sequence = message['tasks'].get('sequence',-1)
                     message['receive_timestamp'] = temp_timestamp
                     # example: Client 1 received : {'mode': 0, 'tasks': [{'task_type': 2, 'token': 'token1', 'true_value': 'value1'}, {'task_type': 1, 'token': 'token2', 'true_value': 'value2'}]}
-                    print(f"Client {client_id} received : {message}")
                     self.task_queue.put(message)
                     single_res = self.single_process()
                     temp_res = {

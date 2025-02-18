@@ -61,11 +61,14 @@ class EdgeCommunicator:
                 message_bytes = client_socket.recv(message_length)
                 
                 message = json.loads(message_bytes.decode('utf-8'))
-                
                 single_observation = message.get('observation', None)
+                sequence = message.get('sequence', None)
+                
                 if single_observation:
                     with self.lock:
                         self.clients_index_ip_dict[str(index)]['observation'] = single_observation
+                        self.clients_index_ip_dict[str(index)]['sequence'] = sequence
+                        logging.info(f" clients_index_ip_dict = {self.clients_index_ip_dict}")
                     # 打印接收到的数据
                 logging.info(f"Received data from client {index}: type {type(message)} message = {message}")
                 logging.info(f"get_observation: {self.get_client_observation_by_index(index)}")
@@ -85,6 +88,7 @@ class EdgeCommunicator:
             
         """
         if str(index) in self.message_queues:
+            logging.info(f"Center sending message to client {index}: {message}")
             self.message_queues[str(index)].put(message)
         else:
             print(f"No client with index {index} is connected.")
@@ -109,7 +113,8 @@ class EdgeCommunicator:
                 self.clients_index_ip_dict[str(index)] = {
                     'ip': ip,
                     'port': port,
-                    'socket': client_socket
+                    'socket': client_socket,
+                    'sequence':-1
                 }
             self.message_queues[str(index)] = queue.Queue()  # 为每个客户端创建消息队列
             print(f"Accepted connection from {ip}:{port} with index {index}")
@@ -213,15 +218,38 @@ class EdgeCommunicator:
                 elif mode == DistributionType.TASK:
                     # task_transmission
                     print(f"Sent TASK message to client {index}")
-                    self.process_task_message_transmission(client_socket, message['data'])
+                    self.process_task_message_transmission(client_socket, message)
             except Exception as e:
                 print(f"Error sending message to client {index}: {e}")
                 break
         
-    def get_overall_observation(self):
+    def get_overall_observation(self, sequence):
         """获取所有边缘节点的观测量"""
-        with self.lock:
-            return self.clients_index_ip_dict
+        logging.info(f" inside get_overall_observation: {self.clients_index_ip_dict}")
+        start_time = time.time()
+        timeout = 10 * 60  # 5 分钟超时时间
+        while True:
+            with self.lock:
+                print(f"等待所有边缘节点返回观测量, 目标观测量序列:{sequence} ")
+                logging.info(f" lock get: {self.clients_index_ip_dict}")
+                all_sequences_match = all(
+                    self.clients_index_ip_dict[str(client_index)]['sequence'] == sequence
+                    for client_index in self.clients_index_ip_dict
+                )
+
+                if all_sequences_match:
+                    return self.clients_index_ip_dict
+
+            # 检查是否超时
+            if time.time() - start_time > timeout:
+                print("等待超时，返回当前观测量")
+                with self.lock:
+                    return self.clients_index_ip_dict
+
+            # 等待一段时间后再检查
+            time.sleep(5)
+        
+        
     def get_client_observation_by_index(self,index):
         """获取所有边缘节点的观测量"""
         with self.lock:
@@ -234,7 +262,7 @@ if __name__ == "__main__":
     communicator = EdgeCommunicator(config_file_path='config/Running_config.json')
     communicator.establish_connection()
     # 算法实际的迭代过程 和任务下发有关
-    message_list = {"sequence":0,"mode":DistributionType.TASK, "data" : [{"task_type":0,"token": "i can only be so abrasive towards people like brock lawly and the numerous nameless fundies before i start feeling lame", "reference_value": "0"},{"task_type":2,"token": "who captained the first european ship to sail around the tip of africa", "reference_value": "['Bartolomeu Dias']"}]}
+    message_list = {'edge_id': '0', 'task_set': [{'task_id': 682, 'task_type': 1, 'task_token': 'Please identify the named entities in the following text. Classify entities into categories such as Person, Location, Organization, Miscellaneous \n\n Text:Widodo', 'reference_value': 'PER'}, {'task_id': 583, 'task_type': 1, 'task_token': 'Please identify the named entities in the following text. Classify entities into categories such as Person, Location, Organization, Miscellaneous \n\n Text:,', 'reference_value': 'MISC'}], 'mode': DistributionType.TASK, 'sequence': 0, 'timestamp': 1739867172.290468}
     model_message = {
         "mode": DistributionType.MODEL,
         "file_path": "/mnt/data/workspace/LLM_Distribution_Center/model/models/distilBert/distilgpt2.IQ3_M.gguf"

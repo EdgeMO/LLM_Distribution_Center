@@ -11,10 +11,13 @@ from Active_Inference.Model_Planning import ActiveInferenceTaskAllocation,ModelI
 from data_middleware.InputProcessor import InputProcessor
 from data_middleware.OutputProcessor import OutputProcessor
 # 负责整体节点的调度
+import logging
 
+# 在文件开头配置日志记录
+logging.basicConfig(filename='core_process.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 class Core:
     def __init__(self):
-        self.num_edge_nodes = 2
+        self.num_edge_nodes = 1
         self.input_num_features = 7
         self.model_list = [
             ModelInfo(1, 0.1, 0.9, 100, 10, 1000000, 5),
@@ -27,13 +30,29 @@ class Core:
         self.center = EdgeCommunicator(config_file_path='/mnt/data/workspace/LLM_Distribution_Center/config/Running_config.json')
         self.ouput_processor = OutputProcessor(config_file_path='/mnt/data/workspace/LLM_Distribution_Center/config/Running_config.json')
         self.allocator = ActiveInferenceTaskAllocation(self.num_edge_nodes, self.input_num_features,model_list=self.model_list, accuracy_threshold=self.accuracy_threshold)
-        pass
+    def wrapper_for_task_distribution(self,assignments, formated_input_for_algorithm, task_set):
+        
+        # 构建任务分配的字典
+        edge_id_to_task_id_dict = {}
+        for i, task_individual in enumerate(formated_input_for_algorithm):
+            print(f"任务 {task_individual['id']} 分配给节点: {assignments[i]}")
+            if str(assignments[i]) in edge_id_to_task_id_dict:
+                edge_id_to_task_id_dict[str(assignments[i])].append(task_individual['id'])
+            else:
+                edge_id_to_task_id_dict[str(assignments[i])]= [task_individual['id']]
+                
+        # 对算法的输出进行后处理，得到消息格式
+        message_list = self.input_generator.generate_offloading_message(edge_id_to_task_id_dict, task_set)
+        
+        return message_list
+        
+        
     def process(self):
         # 建立连接
         self.center.establish_connection()
         for sequence in range(10):
             # 生成当前时刻下的任务集合
-            task_set = self.input_generator.generate_task_set_for_each_timestamp(10)
+            task_set = self.input_generator.generate_task_set_for_each_timestamp(4)
             formated_input_for_algorithm = []
             """            
             {
@@ -47,8 +66,9 @@ class Core:
                         'information_density': np.random.uniform(0, 1),
                         'special_symbol_ratio': np.random.uniform(0, 1)
                     }
-                }
+            }
             """
+            print("开始处理任务,生成任务观测量")
             for task in task_set:
                 # 生成对输入的观测量,传给算法模块
                 temp_input_features = {}
@@ -63,44 +83,42 @@ class Core:
             
             # 算法给出任务卸载的结果
             assignments = self.allocator.process(formated_input_for_algorithm)
-            
-            
-            # 构建任务分配的字典
-            edge_id_to_task_id_dict = {}
-            for i, task_individual in enumerate(formated_input_for_algorithm):
-                print(f"任务 {task_individual['id']} 分配给节点: {assignments[i]}")
-                if str(assignments[i]) in edge_id_to_task_id_dict:
-                    edge_id_to_task_id_dict[str(assignments[i])].append(task_individual['id'])
-                else:
-                    edge_id_to_task_id_dict[str(assignments[i])]= [task_individual['id']]
                     
             # 对算法的输出进行后处理，得到消息格式
-            message_list = self.input_generator.generate_offloading_message(edge_id_to_task_id_dict, task_set)
-            
-            # 发送消息
+            message_list = self.wrapper_for_task_distribution(assignments, formated_input_for_algorithm, task_set)
+            print("给客户端发送任务")
+            # 给边缘端发送文本任务
             for message in message_list:
+                # 有几个 for 循环 就有几个 edge 节点
                 edge_id = int(message.get('edge_id', 0))
                 # 组织一下当前消息的格式
                 message["mode"] = DistributionType.TASK
                 message['sequence'] = sequence
                 message['timestamp'] = time.time()
                 self.center.send_task_message_to_client(edge_id, message)
-            pass
-                
-                
-                
-                
-            # 生成当前环境观测量
-            observation = self.center.get_observation()
-        
-            # 基于观测量，运行算法，生成任务下发的决策
-            algorithem_output = self.task_offloading_generator.run(observation, task_set)
             
-            # 基于任务下发的决策，调用 output_processor 生成对应的消息格式
-            task_message = self.ouput_processor.generate_formated_algorithm_output_for_task_offloading(algorithem_output)
-            # 调用 center 发送消息
-            self.center.send_task_message_to_client(task_message)
-            # 统计相关指标，并且更新下本地的环境观测量
+            # 生成当前环境观测量，只有当所有边缘节点都返回了 sequence 之后才能进行下一步
+            observation = self.center.get_overall_observation(sequence)
+            print(f"第 {sequence} 个时间戳的观测结果 {observation}:")
+            # 生成算法适配的观测量数据结构
+            update_system_observation = []
+            for key,value in observation.items():
+                # 遍历每个edge节点的观测量
+                temp_dict = {}
+                edge_id = int(key)
+                edge_observation = value['observation']
+                for key,value in edge_observation.items():
+                    # 为算法包装更新量
+                    if 'time' in key:
+                        temp_dict['accuracy'] = value
+                    if 'accuracy' in key:
+                        temp_dict['latency'] = value
+                    if 'disk' in key:
+                        temp_dict['avg_throughput'] = value
+                update_system_observation.append(temp_dict)
+            
+            self.allocator.feedback(update_system_observation)
+            
             
         pass
 if __name__ == "__main__":
