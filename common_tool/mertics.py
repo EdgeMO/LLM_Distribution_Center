@@ -127,11 +127,12 @@ class Metrics:
         if type(reference) != str:
             reference = str(reference)
         EMOTION_CATEGORIES = {
-            "0": "location",
-            "1": "person",
-            "2": "miscellaneous"
+            "MISC": "miscellaneous",
+            "LOC": "location",
+            "PER": "person"
         }
-        reference_type = reference.lower()
+        reference_type = EMOTION_CATEGORIES.get('reference',"location")
+        reference_type = reference_type.lower()
         if reference_type in prediction:
             return 1
         return 0

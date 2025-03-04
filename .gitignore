@@ -6,6 +6,7 @@ __pycache__/
 *.tiktoken
 *.bin
 *.rar
+*.tar.gz
 # C extensions
 *.so
 *.ipynb

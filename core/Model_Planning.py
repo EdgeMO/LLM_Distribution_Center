@@ -49,7 +49,7 @@ class Core:
         
     def process(self):
         # 建立连接
-        self.center.establish_connection()
+        #self.center.establish_connection()
         for sequence in range(10):
             # 生成当前时刻下的任务集合
             task_set = self.input_generator.generate_task_set_for_each_timestamp(4)

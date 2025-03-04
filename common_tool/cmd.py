@@ -45,9 +45,28 @@ class CMD:
                 file.write(e.stderr)
             return ''
 
+    def run_perplexity_process_cmd(self,perplexity_path,model_path,test_txt_file_path):
+        """ for edge node to run perplexity process command
 
-
-
+        Args:
+            model_path (_type_): path to model
+            test_txt_file_path (_type_): path to test txt file
+        """
+        command = [
+            perplexity_path,
+            "-m", model_path,
+            "-f", f"{test_txt_file_path}",
+        ]
+        try:
+            result = subprocess.run(command,capture_output=True, text=True, check=True)
+            print(result.stdout)
+            temp_res = result.stdout
+            return temp_res
+        except subprocess.CalledProcessError as e:
+            print(f"Error occurred: {e}")
+            with open("perplexity_error.txt", "a+") as file:
+                file.write(e.stderr)
+            return ''
 # 定义要执行的命令和参数
 
         
@@ -57,7 +76,7 @@ if __name__ == '__main__':
     query_words = "please answer the following question based on the text provided without explanation \n\n Question:"
     question = f"what's the final sum of 2 + 2"
     llama_cli_path = "/mnt/data/workspace/LLM_Distribution_Edge/build/bin/llama-cli"
-    model_path = "/mnt/data/workspace/LLM_Distribution_Center/model/HF/models--MaziyarPanahi--Qwen2.5-7B-Instruct-GGUF/snapshots/113085215169f69e309fa57d351d7e2b06e1350e/Qwen2.5-7B-Instruct.IQ1_M.gguf"
+    model_path = "/mnt/data/workspace/LLM_Distribution_Center/merge_model.gguf"
     res = cmd.run_task_process_cmd(query_words,question,llama_cli_path,model_path)
     memory_left_get = cmd.get_available_memory()
     print(res)
