@@ -27,10 +27,17 @@ from config.type import DistributionType, TaskType, EnumEncoder
 
 class Client_Connection:
     def __init__(self, config_path):
+        # tcp connection
         self.server_config = client_server_config_init(config_path)
         self.server_ip = self.server_config.get('server_ip', None)
         self.server_port = self.server_config.get('server_port', None)
         
+        # edge dployment
+        self.deplotment_config = client_model_util_init(config_path)
+        self.llama_cli_path = self.deplotment_config.get('llama_cli_path','')
+        self.model_for_use_path = self.deplotment_config.get('model_path','')
+        
+        # model transmitting
         self.models_directory = "downloaded_models"
         os.makedirs(self.models_directory, exist_ok=True)
         self.csv_path = 'metrics.csv'        # 确保模型目录存在
@@ -52,11 +59,11 @@ class Client_Connection:
     def generate_model_path(self):
         
         
-        return "/mnt/data/workspace/LLM_Distribution_Center/model/models/t5/DPOB-NMTOB-7B.i1-Q4_K_M.gguf"
+        return self.model_for_use_path
     def generate_llama_cli_path(self):
         
         
-        return "/mnt/data/workspace/LLM_Distribution_Edge/build/bin/llama-cli"
+        return self.llama_cli_path
     def single_process(self):
         """
         pick one task set from queue and process it , get related metrics and current status

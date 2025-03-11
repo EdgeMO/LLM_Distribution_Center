@@ -1,8 +1,10 @@
 import os
 import sys
-import pandas as pd
 import time
 current_working_directory = os.getcwd()
+import numpy as np
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 sys.path.append(current_working_directory)
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 from config.type import TaskType, DistributionType
@@ -26,9 +28,9 @@ class Core:
         ]
 
         self.accuracy_threshold = 0.8
-        self.input_generator = InputProcessor(file_path = '/mnt/data/workspace/LLM_Distribution_Center/data/example.csv')
-        self.center = EdgeCommunicator(config_file_path='/mnt/data/workspace/LLM_Distribution_Center/config/Running_config.json')
-        self.ouput_processor = OutputProcessor(config_file_path='/mnt/data/workspace/LLM_Distribution_Center/config/Running_config.json')
+        self.input_generator = InputProcessor(file_path = 'data/example.csv')
+        self.center = EdgeCommunicator(config_file_path='config/Running_config.json')
+        self.ouput_processor = OutputProcessor(config_file_path='config/Running_config.json')
         self.allocator = ActiveInferenceTaskAllocation(self.num_edge_nodes, self.input_num_features,model_list=self.model_list, accuracy_threshold=self.accuracy_threshold)
     def wrapper_for_task_distribution(self,assignments, formated_input_for_algorithm, task_set):
         
@@ -49,10 +51,10 @@ class Core:
         
     def process(self):
         # 建立连接
-        #self.center.establish_connection()
+        self.center.establish_connection()
         for sequence in range(10):
             # 生成当前时刻下的任务集合
-            task_set = self.input_generator.generate_task_set_for_each_timestamp(4)
+            task_set = self.input_generator.generate_task_set_for_each_timestamp(2)
             formated_input_for_algorithm = []
             """            
             {
@@ -75,12 +77,43 @@ class Core:
                 task_type = task.get('task_type', 0)
                 task_id = task.get('task_id', 0)
                 task_token = task.get('task_token', '')
-                task_reference_value = task.get('task_reference_value', '')
                 temp_input_features['features'] = self.input_generator.calculate_input_features(task_token)
                 temp_input_features['features']['task_type'] = task_type
                 temp_input_features['id'] = task_id
+                for key, value in temp_input_features['features'].items():
+                    try:
+                        temp_input_features['features'][key] = float(value)
+                    except (ValueError, TypeError):
+                        print(f"警告: 特征 '{key}' 的值 '{value}' 不是数值，将使用默认值 0")
+                        temp_input_features['features'][key] = 0.0
+                # ID 可以保持为字符串，因为它不会用作特征
+                temp_input_features['id'] = task_id
                 formated_input_for_algorithm.append(temp_input_features)
+            logging.info(f"sequence {sequence} formated_input_for_algorithm = {formated_input_for_algorithm}")
             
+            # 定义预期的特征名称和顺序
+            feature_names = [
+                'vocabulary_complexity', 'syntactic_complexity', 'context_dependency', 
+                'ambiguity_level', 'information_density', 'special_symbol_ratio', 'task_type'
+            ]
+            
+            # 将字典列表转换为特征数组
+            feature_arrays = []
+            for task_dict in formated_input_for_algorithm:
+                feature_values = []
+                for feature_name in feature_names:
+                    # 获取特征值，默认为0.0
+                    value = task_dict['features'].get(feature_name, 0.0)
+                    # 已经确保了值是浮点数，但再次转换以确保安全
+                    feature_values.append(float(value))
+                
+                feature_arrays.append(feature_values)
+            
+            # 转换为 NumPy 数组
+            task_features_array = np.array(feature_arrays, dtype=float)
+            
+            # 打印调试信息
+            print(f"转换后的特征数组形状: {task_features_array.shape}, 类型: {task_features_array.dtype}")
             # 算法给出任务卸载的结果
             assignments = self.allocator.process(formated_input_for_algorithm)
                     

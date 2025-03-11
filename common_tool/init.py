@@ -17,3 +17,8 @@ def client_server_config_init(config_path):
         res = json.load(file)
         server_ip_config = res.get('server_ip_config',None)
         return server_ip_config
+def client_model_util_init(config_path):
+    with open(file = config_path, mode= 'r') as file:
+        res = json.load(file)
+        edge_deployment = res.get('edge_deployment',None)
+        return edge_deployment

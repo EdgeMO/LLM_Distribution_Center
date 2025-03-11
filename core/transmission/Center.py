@@ -265,6 +265,6 @@ if __name__ == "__main__":
     message_list = {'edge_id': '0', 'task_set': [{'task_id': 682, 'task_type': 1, 'task_token': 'Please identify the named entities in the following text. Classify entities into categories such as Person, Location, Organization, Miscellaneous \n\n Text:Widodo', 'reference_value': 'PER'}, {'task_id': 583, 'task_type': 1, 'task_token': 'Please identify the named entities in the following text. Classify entities into categories such as Person, Location, Organization, Miscellaneous \n\n Text:,', 'reference_value': 'MISC'}], 'mode': DistributionType.TASK, 'sequence': 0, 'timestamp': 1739867172.290468}
     model_message = {
         "mode": DistributionType.MODEL,
-        "file_path": "/mnt/data/workspace/LLM_Distribution_Center/model/models/distilBert/distilgpt2.IQ3_M.gguf"
+        "file_path": "/home/wu/workspace/qwen2.5-7b-instruct-q4_0.gguf"
     }
-    communicator.send_task_message_to_client(0, message_list)
+    communicator.send_task_message_to_client(0, model_message)

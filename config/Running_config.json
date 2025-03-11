@@ -34,6 +34,10 @@
         "server_ip" : "127.0.0.1",
         "server_port" : 12345
     },
+    "edge_deployment":{
+        "model_path":"/home/wu/workspace/qwen2.5-7b-instruct-q4_0.gguf",
+        "llama_cli_path":"/home/wu/workspace/LLM_Distribution_Edge/build/bin/llama-cli"
+    },
     "task_type_config":{
         "TC":{},
         "NER":{},

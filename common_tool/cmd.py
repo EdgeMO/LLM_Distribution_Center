@@ -1,18 +1,18 @@
 import subprocess
-import psutil
+# import psutil
 import shutil
 class CMD:
     def __init__(self):
         
         pass
-    def get_available_memory(self):
+    # def get_available_memory(self):
         
-        """
-        获取系统剩余内存（以GB为单位）
-        """
-        mem = psutil.virtual_memory()
-        left_mem = mem.available / (1024 ** 3)
-        return left_mem
+    #     """
+    #     获取系统剩余内存（以GB为单位）
+    #     """
+    #     mem = psutil.virtual_memory()
+    #     left_mem = mem.available / (1024 ** 3)
+    #     return left_mem
     def get_free_disk_space(self, path = "/"):
         total, used, free = shutil.disk_usage(path)
         res = free / (2 ** 30)
