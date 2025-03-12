@@ -24,15 +24,21 @@ class InputProcessor:
         self.random_state = 930
         self.df = pd.read_csv(file_path)
         self.common_words = set(['the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'I'])
+        self.call_count = 0 # generate random seed
+        
     def generate_task_set_for_each_timestamp(self, task_num):
         """
         randomly select task_num tasks from data iterator
-
+        
         Args:
             task_num (_type_): task_set size
         """
-        sampled_task_set = self.df.sample(n = task_num, random_state = self.random_state)
-        task_dicts = sampled_task_set.to_dict(orient = 'records')
+        # 使用递增的随机种子
+        current_seed = self.random_state + self.call_count
+        self.call_count += 1
+        
+        sampled_task_set = self.df.sample(n=task_num, random_state=current_seed)
+        task_dicts = sampled_task_set.to_dict(orient='records')
                 
         return task_dicts
     

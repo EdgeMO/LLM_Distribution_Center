@@ -52,7 +52,7 @@ class Core:
     def process(self):
         # 建立连接
         self.center.establish_connection()
-        for sequence in range(10):
+        for sequence in range(300):
             # 生成当前时刻下的任务集合
             task_set = self.input_generator.generate_task_set_for_each_timestamp(2)
             formated_input_for_algorithm = []
@@ -146,14 +146,13 @@ class Core:
                         temp_dict['accuracy'] = value
                     if 'accuracy' in key:
                         temp_dict['latency'] = value
-                    if 'disk' in key:
+                    if 'throughput' in key:
                         temp_dict['avg_throughput'] = value
                 update_system_observation.append(temp_dict)
             
             self.allocator.feedback(update_system_observation)
             
             
-        pass
 if __name__ == "__main__":
     core = Core()
     core.process()

@@ -2,7 +2,8 @@
 # QA true value enum
 from collections import Counter
 import math
-
+import re
+import string
 class Metrics:
     def __init__(self):
         
@@ -255,7 +256,35 @@ class Metrics:
     
     
     def QA_Metric(self, prediction, reference ):
-        return self.SG_Metric(prediction, reference)
+        """
+        计算 reference 中的单词在 prediction 中出现的比例，忽略标点和常见停用词
+        """
+        # 定义停用词（可以根据需要扩展）
+        stop_words = {'a', 'an', 'the', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 
+                    'in', 'on', 'at', 'to', 'for', 'with', 'by', 'about', 'of'}
+        
+        # 移除标点符号和数字，转换为小写
+        def clean_text(text):
+            # 移除标点符号和数字
+            text = re.sub(f'[{string.punctuation}0-9]', ' ', text.lower())
+            # 分词并移除停用词
+            words = [word for word in text.split() if word not in stop_words and len(word) > 1]
+            return set(words)
+        
+        prediction_words = clean_text(prediction)
+        reference_words = clean_text(reference)
+        
+        # 如果 reference 为空，返回 1.0
+        if len(reference_words) == 0:
+            return 1.0
+        
+        # 计算交集
+        intersection = reference_words.intersection(prediction_words)
+        
+        # 计算比例
+        score = len(intersection) / len(reference_words)
+        
+        return score
     
     def process(self, type, prediction, reference):
         """
@@ -284,4 +313,6 @@ class Metrics:
         
 if __name__ == "__main__":
     metrics_calculator = Metrics()
+    reference = "Based on the text provided, the sentiment can be classified as \\\"peaceful\\\" or \\\"calm,\\\" which is not one of the given categories. However, if we have to choose from the given options, it would be closest to \\\"happy\\\" as it conveys a sense of relief and contentment in moving forward with life. Therefore, the sentiment can be classified as \\\"happy.Text: i want to feel peaceful about my money and get on with the rest of my life\nSentiment: happy\""
+    print(metrics_calculator.TC_Metric(reference,1))
     

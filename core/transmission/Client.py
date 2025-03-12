@@ -40,10 +40,8 @@ class Client_Connection:
         # model transmitting
         self.models_directory = "downloaded_models"
         os.makedirs(self.models_directory, exist_ok=True)
-        self.csv_path = 'metrics.csv'        # 确保模型目录存在
         self.chunk_size = 8192  # Matching the server's chunk size
         
-        self.start_time_stamp = datetime.datetime.now().timestamp()
         self.cmd_operator = CMD()
         self.input_processor = InputProcessor()
         self.metrics_operator = Metrics()
@@ -52,9 +50,16 @@ class Client_Connection:
         self.task_queue = Queue()
         self.sequence_queue = Queue()
         
-        # mrtrics
-        self.client_sum_task_accuravy_score = 0
-        self.total_task_num = 0
+        # global metrics
+        self.client_sum_batch_num = 0
+        self.client_sum_task_num = 0
+        self.client_sum_batch_accuravy_score = 0
+        self.client_sum_batch_time_consumption = 0
+        self.client_sum_batch_throughput_score = 0
+        self.client_task_num_batch = []
+        self.record_metrics_file_path = 'client_metrics.csv'
+        
+        
         
     def generate_model_path(self):
         
@@ -64,6 +69,8 @@ class Client_Connection:
         
         
         return self.llama_cli_path
+    
+
     def single_process(self):
         """
         pick one task set from queue and process it , get related metrics and current status
@@ -76,13 +83,13 @@ class Client_Connection:
         task_list = origin_info.get('tasks',{}).get('task_set',[])
         logging.info(f"task_list = {task_list}")
         num_task_list = len(task_list)
+        #
         
         # metrics calculation
         # received timestamp for single batch
         received_timestamp_for_single_batch = origin_info.get('receive_timestamp')
-        self.total_task_num += num_task_list
+        
         single_batch_sum_task_accuravy_score = 0
-        average_local_processing_time = 0
 
         #logging.info(f"task_list =  {task_list}")
         
@@ -90,39 +97,95 @@ class Client_Connection:
         model_path = self.generate_model_path()
         llama_cli_path = self.generate_llama_cli_path()
         
+        total_cpu_usage_percentage = 0
+        total_mem_usage_percentage = 0
+        
         for task in task_list:
-            self.total_task_num += 1
+            
             # cmd进行任务处理
             token_type = task.get('task_type')
             token = task.get('task_token')
             reference_value = task.get('reference_value')
             query_prefix = self.input_processor.generate_query_word_from_task_type(token_type)
-            # 获取单次prediction的处理结果
-            prediction = self.cmd_operator.run_task_process_cmd(query_prefix=query_prefix, query_word=token, llama_cli_path = llama_cli_path, model_path=model_path)
+            # 获取单次token_prediction的处理结果
+            token_prediction, resource_used_status = self.cmd_operator.run_task_process_cmd(query_prefix=query_prefix, query_word=token, llama_cli_path = llama_cli_path, model_path=model_path)
             
-            accuracy_score = self.metrics_operator.process(type = token_type, prediction = prediction, reference = reference_value)
+            # single task accuracy
+            accuracy_score = self.metrics_operator.process(type = token_type, prediction = token_prediction, reference = reference_value)
             single_batch_sum_task_accuravy_score += accuracy_score
-            logging.info(f"token = {token}, prediction = {prediction} accuracy_score = {accuracy_score}")
-        
+            
+            # single task resource status
+            total_cpu_usage_percentage += resource_used_status.get('cpu',0)
+            total_mem_usage_percentage += resource_used_status.get('memory',0)
+            
+            logging.info(f"token = {token}, token_prediction = {token_prediction} accuracy_score = {accuracy_score}")
         
         
         # res metrics calculation
         finished_single_batch_timestamp = datetime.datetime.now().timestamp()
-        free_disk_space = self.cmd_operator.get_free_disk_space()
-        self.client_sum_task_accuravy_score += single_batch_sum_task_accuravy_score
-        average_local_processing_time_per_task = (finished_single_batch_timestamp - received_timestamp_for_single_batch) / num_task_list
+        # time consumption for single task batch
+        single_batch_time_consumption = (finished_single_batch_timestamp - received_timestamp_for_single_batch) / 1000
+        
+        
+        
+        average_local_processing_time_per_task = (single_batch_time_consumption / num_task_list) 
         average_batch_accuracy_score_per_batch = single_batch_sum_task_accuravy_score / num_task_list
         
+        # calculate avg_throughput_score_per_batch
+        avg_cpu_usage = total_cpu_usage_percentage / num_task_list
+        avg_mem_usage = total_mem_usage_percentage / num_task_list
+        avg_throughput_score_per_batch = average_local_processing_time_per_task + avg_cpu_usage + avg_mem_usage 
         
-        res = {
-            "average_local_processing_time_per_task":average_local_processing_time_per_task,
+        # global score record
+        sequence = origin_info.get('tasks',{}).get('sequence',0)
+        self.client_sum_batch_num += 1
+        self.client_sum_task_num += num_task_list
+        self.client_sum_batch_accuravy_score += single_batch_sum_task_accuravy_score
+        self.client_sum_batch_time_consumption += single_batch_time_consumption
+        self.client_sum_batch_throughput_score += avg_throughput_score_per_batch
+        self.client_task_num_batch.append(num_task_list)
+        
+        
+        # record metrics
+        data_need_to_record = {
+            "sequence":sequence,
+            "single_batch_time_consumption" : single_batch_time_consumption,
             "average_batch_accuracy_score_per_batch":average_batch_accuracy_score_per_batch,
-            "free_disk_space":free_disk_space
+            "avg_throughput_score_per_batch": avg_throughput_score_per_batch,
+            "client_sum_batch_num":self.client_sum_batch_num,
+            "client_sum_task_num":self.client_sum_task_num,
+            "client_sum_batch_accuravy_score":self.client_sum_batch_accuravy_score,
+            "client_sum_batch_time_consumption":self.client_sum_batch_time_consumption,
+            "client_sum_batch_throughput_score":self.client_sum_batch_throughput_score,
+            "client_task_num_batch":self.client_task_num_batch
         }
+        # 检查文件是否存在
+        file_exists = os.path.isfile(self.record_metrics_file_path)
         
+        # 写入CSV文件
+        try:
+            with open(self.record_metrics_file_path, 'a', newline='') as csvfile:
+                # 定义字段名
+                fieldnames = list(data_need_to_record.keys())
+                
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                
+                # 如果文件不存在，写入表头
+                if not file_exists:
+                    writer.writeheader()
+                writer.writerow(data_need_to_record)
+        except Exception as e:
+            print(f"记录数据到CSV文件时出错: {e}")        
+        res = {
+            "single_batch_time_consumption" : single_batch_time_consumption,
+            "average_batch_accuracy_score_per_batch":average_batch_accuracy_score_per_batch,
+            "avg_throughput_score_per_batch": avg_throughput_score_per_batch
+        }
+        logging.info(f"data_need_to_record = {data_need_to_record}")
         logging.info(f"res = {res}")
         return res
             
+
     def client_send_thread_simulation(self, client_socket, client_id):
         try:
             while True:
