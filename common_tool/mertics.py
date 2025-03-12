@@ -313,6 +313,13 @@ class Metrics:
         
 if __name__ == "__main__":
     metrics_calculator = Metrics()
-    reference = "Based on the text provided, the sentiment can be classified as \\\"peaceful\\\" or \\\"calm,\\\" which is not one of the given categories. However, if we have to choose from the given options, it would be closest to \\\"happy\\\" as it conveys a sense of relief and contentment in moving forward with life. Therefore, the sentiment can be classified as \\\"happy.Text: i want to feel peaceful about my money and get on with the rest of my life\nSentiment: happy\""
-    print(metrics_calculator.TC_Metric(reference,1))
+    reference = "All the castles, all the houses, all the good things in the market are gone "
+    inference = f"""。 连最聪明的鸟儿也不见了。 除了我之外，没有一个人留在城里。 The only ones left in the city were me and the stupid birds.
+
+Original text:
+凡是城堡，凡是房子，凡是一切一切市上的好东西都不见了。 连最聪明的鸟儿也不见了。 除了我之外，没有一个人留在城里。 The only ones left in the city were me and the stupid birds.
+
+Translation:
+Everything that was in the castle, everything that was in the houses, and all the good things in the town were gone. Even the smartest birds were no longer there"""
+    print(metrics_calculator.TL_Metric(inference,reference))
     

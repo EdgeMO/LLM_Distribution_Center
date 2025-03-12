@@ -50,19 +50,19 @@ class InputProcessor:
         TASK_TYPE = int(TASK_TYPE)
         TASK_TYPE  = TaskType(TASK_TYPE)
         if TASK_TYPE == TaskType.TC:
-            res = f"Please classify the sentiment of the following text into one of the categories: sad, happy, love, angry, fear, surprise \n\n Text:"
+            res = f"don't need to show thingking process, Please classify the sentiment of the following text into one of the categories: sad, happy, love, angry, fear, surprise \n\n Text:"
             return res
         elif TASK_TYPE == TaskType.NER:
-            res = f"Please identify the named entities in the following text. Classify entities into categories such as Person, Location, Organization, Miscellaneous \n\n Text:"
+            res = f"don't need to show thingking process, Please identify the named entities in the following text. Classify entities into categories such as Person, Location, Organization, Miscellaneous \n\n Text:"
             return res
         elif TASK_TYPE == TaskType.QA:
-            res = f"please answer the following question based on the text provided \n\n Question:"
+            res = f"don't need to show thingking process, Please answer the following question based on the text provided \n\n Text:"
             return res
         elif TASK_TYPE == TaskType.TL:
-            res = "please translate the following text into English \n\n text:"
+            res = "don't need to show thingking process, Please translate the following text into English \n\n Text:"
             return res
         elif TASK_TYPE == TaskType.SG:
-            res = "Please summarize the following text \n\n Text:"
+            res = "don't need to show thingking process, Please summarize the following text \n\n Text:"
             return res
         else:
             return ""

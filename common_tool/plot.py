@@ -3,6 +3,11 @@ import re
 # import matplotlib.font_manager as fm
 #fm._rebuild()  # 重建字体缓存
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.patheffects as path_effects
+from matplotlib.ticker import MultipleLocator, FormatStrFormatter, FixedLocator
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -186,11 +191,7 @@ def process_log_file(log_file_path):
         import traceback
         traceback.print_exc()
         return [], {}
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patheffects as path_effects
-from matplotlib.ticker import MultipleLocator, FormatStrFormatter, FixedLocator
+
 
 def plot_model_size_vs_ppl(models_data, output_file='model_size_vs_ppl.png'):
     """

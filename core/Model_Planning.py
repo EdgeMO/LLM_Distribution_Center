@@ -14,24 +14,18 @@ from data_middleware.InputProcessor import InputProcessor
 from data_middleware.OutputProcessor import OutputProcessor
 # 负责整体节点的调度
 import logging
-
+from config.type import ModelInfo
 # 在文件开头配置日志记录
 logging.basicConfig(filename='core_process.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 class Core:
     def __init__(self):
         self.num_edge_nodes = 1
         self.input_num_features = 7
-        self.model_list = [
-            ModelInfo(1, 0.1, 0.9, 100, 10, 1000000, 5),
-            ModelInfo(2, 0.2, 0.95, 200, 20, 2000000, 10),
-            ModelInfo(3, 0.3, 0.98, 300, 30, 3000000, 15)
-        ]
 
-        self.accuracy_threshold = 0.8
         self.input_generator = InputProcessor(file_path = 'data/example.csv')
         self.center = EdgeCommunicator(config_file_path='config/Running_config.json')
         self.ouput_processor = OutputProcessor(config_file_path='config/Running_config.json')
-        self.allocator = ActiveInferenceTaskAllocation(self.num_edge_nodes, self.input_num_features,model_list=self.model_list, accuracy_threshold=self.accuracy_threshold)
+        self.allocator = ActiveInferenceTaskAllocation(self.num_edge_nodes, self.input_num_features)
     def wrapper_for_task_distribution(self,assignments, formated_input_for_algorithm, task_set):
         
         # 构建任务分配的字典
@@ -125,7 +119,7 @@ class Core:
                 # 有几个 for 循环 就有几个 edge 节点
                 edge_id = int(message.get('edge_id', 0))
                 # 组织一下当前消息的格式
-                message["mode"] = DistributionType.TASK
+                message["mode"] = DistributionType.TASK.value
                 message['sequence'] = sequence
                 message['timestamp'] = time.time()
                 self.center.send_task_message_to_client(edge_id, message)

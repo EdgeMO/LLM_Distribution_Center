@@ -5,6 +5,7 @@ __pycache__/
 *.gguf
 *.tiktoken
 *.bin
+client_metrics.csv
 *.rar
 *.tar.gz
 # C extensions

@@ -212,48 +212,100 @@ class Client_Connection:
             print(f"Client {client_id} encountered an error during send: {e}")
 
     def client_receive_thread(self, client_socket, client_id):
-        try:
-            print(f"Client {client_id} ready to receive data.")
-            while True:
-                # parse meta data length
+        """
+        客户端接收线程，即使发生错误也能继续保持连接
+        
+        Args:
+            client_socket: 客户端套接字
+            client_id: 客户端ID
+        """
+        print(f"Client {client_id} ready to receive data.")
+        
+        # 标记套接字是否已关闭
+        socket_closed = False
+        
+        while True:
+            try:
+                # 解析元数据长度
                 length_bytes = client_socket.recv(4)
                 if not length_bytes:
+                    print(f"Client {client_id}: Connection closed by server (empty length bytes)")
                     break
                 
                 message_length = struct.unpack('>I', length_bytes)[0]
-                # parse meta data
                 print(f"Client {client_id} received message length: {message_length}")
-                message_bytes = client_socket.recv(message_length)
-                message = json.loads(message_bytes.decode('utf-8'))
-                # record current timestamp
-                temp_timestamp = datetime.datetime.now().timestamp()
                 
-                # get the mode of the message
-                mode = message.get('mode')
-                if mode == DistributionType.MODEL.value:
-                    print("client recieving model")
-                    # entry model transmission with client_socket
-                    self.handle_file_transfer(client_socket, message, client_id)
-                elif mode == DistributionType.TASK.value:
-                    # record received timestamp
-                    sequence = message['tasks'].get('sequence',-1)
-                    message['receive_timestamp'] = temp_timestamp
-                    # example: Client 1 received : {'mode': 0, 'tasks': [{'task_type': 2, 'token': 'token1', 'true_value': 'value1'}, {'task_type': 1, 'token': 'token2', 'true_value': 'value2'}]}
-                    self.task_queue.put(message)
-                    single_res = self.single_process()
-                    temp_res = {
-                        "sequence":sequence,
-                        "observation":single_res
-                    }
-                    self.sequence_queue.put(temp_res)
+                # 解析元数据
+                message_bytes = bytearray()
+                bytes_received = 0
+                
+                # 分块接收消息，防止大消息导致问题
+                while bytes_received < message_length:
+                    chunk = client_socket.recv(min(4096, message_length - bytes_received))
+                    if not chunk:
+                        print(f"Client {client_id}: Connection closed by server during message receive")
+                        socket_closed = True
+                        break
+                    message_bytes.extend(chunk)
+                    bytes_received += len(chunk)
+                
+                if socket_closed:
+                    break
+                    
+                # 解码消息
+                try:
+                    message = json.loads(message_bytes.decode('utf-8'))
+                    # 记录当前时间戳
+                    temp_timestamp = datetime.datetime.now().timestamp()
+                    
+                    # 获取消息模式
+                    mode = message.get('mode')
+                    
+                    if mode == DistributionType.MODEL.value:
+                        print(f"Client {client_id} receiving model")
+                        try:
+                            # 处理模型传输
+                            self.handle_file_transfer(client_socket, message, client_id)
+                        except Exception as e:
+                            print(f"Client {client_id} error during model transfer: {e}")
+                            logging.error(f"Client {client_id} error during model transfer: {e}")
+                            # 继续接收下一条消息，不中断连接
+                            
+                    elif mode == DistributionType.TASK.value:
+                        try:
+                            # 记录接收时间戳
+                            sequence = message['tasks'].get('sequence', -1)
+                            message['receive_timestamp'] = temp_timestamp
+                            
+                            # 放入任务队列
+                            self.task_queue.put(message)
+                            single_res = self.single_process()
+                            temp_res = {
+                                "sequence": sequence,
+                                "observation": single_res
+                            }
+                            self.sequence_queue.put(temp_res)
+                        except Exception as e:
+                            print(f"Client {client_id} error during task processing: {e}")
+                            logging.error(f"Client {client_id} error during task processing: {e}")
+                            # 继续接收下一条消息，不中断连接
+                    else:
+                        print(f"Client {client_id} received unknown message mode: {mode}")
                         
-
-        except Exception as e:
-            print(f"Client {client_id} encountered an error during receive: {e}")
-            logging.error(f"Client {client_id} encountered an error during receive: {e}")
-        finally:
-            client_socket.close()
-            print(f"Client {client_id} finished receiving data and disconnected.")
+                except json.JSONDecodeError as e:
+                    print(f"Client {client_id} received invalid JSON: {e}")
+                    logging.error(f"Client {client_id} received invalid JSON: {e}")
+                    # 继续接收下一条消息，不中断连接
+                    
+            except ConnectionError as e:
+                print(f"Client {client_id} connection error: {e}")
+                logging.error(f"Client {client_id} connection error: {e}")
+                # 连接错误，需要重新建立连接
+                
+            except Exception as e:
+                print(f"Client {client_id} unexpected error: {e}")
+                logging.error(f"Client {client_id} unexpected error: {e}")
+                # 继续尝试接收，除非是致命错误
             
     def handle_file_transfer(self, client_socket, metadata, client_id):
         file_name = metadata['file_name']

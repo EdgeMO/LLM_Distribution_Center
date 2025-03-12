@@ -17,11 +17,9 @@ class ModelInfo:
         self.transmission_cost = transmission_cost
 
 class ActiveInferenceTaskAllocation:
-    def __init__(self, num_edge_nodes: int, num_features: int, model_list: List[ModelInfo], accuracy_threshold: float):
+    def __init__(self, num_edge_nodes: int, num_features: int):
         self.num_edge_nodes = num_edge_nodes
         self.num_features = num_features
-        self.model_list = model_list
-        self.accuracy_threshold = accuracy_threshold
 
         # 转移模型（神经网络）
         hidden_layer_size = max(64, num_features + num_edge_nodes)
@@ -109,44 +107,10 @@ class ActiveInferenceTaskAllocation:
 
         self.accuracy_history.append(np.mean([node['accuracy'] for node in node_performance]))
         self.epoch_count += 1
-
-        if self.epoch_count >= 500 and np.mean(self.accuracy_history[-500:]) < self.accuracy_threshold:
-            self.model_offloading()
-
         # 打印当前负载情况
         current_load = [np.mean([h['avg_throughput'] for h in history[-10:]]) if history else 0 
                         for history in self.node_performance_history]
         print("当前节点负载:", current_load)
-
-    def model_offloading(self):
-        logging.info("开始模型卸载过程...")
-        
-        dummy_features = np.zeros((self.num_edge_nodes, self.num_features))
-        node_assignments = np.arange(self.num_edge_nodes)
-        X = np.column_stack([dummy_features, node_assignments])
-        node_states = self.transition_model.predict(X)
-        
-        offloading_suggestions = []
-        for i, state in enumerate(node_states):
-            best_model = None
-            best_score = float('-inf')
-            for model in self.model_list:
-                score = (model.avg_accuracy / state[0] +
-                         state[1] / model.avg_inference_latency +
-                         model.memory_usage -
-                         model.transmission_cost)
-                if score > best_score:
-                    best_score = score
-                    best_model = model
-            
-            offloading_suggestions.append((i, best_model.id))
-        
-        logging.info("模型卸载建议:")
-        for node, model_id in offloading_suggestions:
-            logging.info(f"边缘节点 {node} 建议加载模型 ID: {model_id}")
-        
-        self.epoch_count = 0
-        self.accuracy_history = []
 
 # 运行示例
 if __name__ == "__main__":
@@ -154,15 +118,8 @@ if __name__ == "__main__":
     num_features = 7
     num_tasks = 10
 
-    model_list = [
-        ModelInfo(1, 0.1, 0.9, 100, 10, 1000000, 5),
-        ModelInfo(2, 0.2, 0.95, 200, 20, 2000000, 10),
-        ModelInfo(3, 0.3, 0.98, 300, 30, 3000000, 15)
-    ]
 
-    accuracy_threshold = 0.8
-
-    allocator = ActiveInferenceTaskAllocation(num_edge_nodes, num_features, model_list, accuracy_threshold)
+    allocator = ActiveInferenceTaskAllocation(num_edge_nodes, num_features)
 
     for step in range(600):
         print(f"\n步骤 {step + 1}:")
