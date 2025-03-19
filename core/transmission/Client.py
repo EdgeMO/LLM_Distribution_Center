@@ -2,8 +2,10 @@ import threading
 import time
 import datetime
 import json
+import shutil
 import socket
 import os 
+import glob
 import sys
 import struct
 import csv
@@ -35,11 +37,9 @@ class Client_Connection:
         # edge dployment
         self.deplotment_config = client_model_util_init(config_path)
         self.llama_cli_path = self.deplotment_config.get('llama_cli_path','')
-        self.model_for_use_path = self.deplotment_config.get('model_path','')
-        
+        self.models_save_directory = self.generate_models_path(self.deplotment_config.get('model_save_path',''))
         # model transmitting
-        self.models_directory = "downloaded_models"
-        os.makedirs(self.models_directory, exist_ok=True)
+        os.makedirs(self.models_save_directory, exist_ok=True)
         self.chunk_size = 8192  # Matching the server's chunk size
         
         self.cmd_operator = CMD()
@@ -57,19 +57,27 @@ class Client_Connection:
         self.client_sum_batch_time_consumption = 0
         self.client_sum_batch_throughput_score = 0
         self.client_task_num_batch = []
-        self.record_metrics_file_path = 'client_metrics.csv'
+        self.record_metrics_file_path = 'metrics/client/client_metrics.csv'
         
         
         
-    def generate_model_path(self):
-        
-        
-        return self.model_for_use_path
+    def generate_models_path(self, relative_directory):
+        current_dir = os.getcwd()
+        absolute_path = os.path.join(current_dir, relative_directory)
+        absolute_path = os.path.normpath(absolute_path)  # 规范化路径
+        logging.info(f'model save path = {absolute_path}')
+        return absolute_path
     def generate_llama_cli_path(self):
         
         
         return self.llama_cli_path
     
+    def generate_model_to_be_used_path(self):
+        directory = os.path.abspath(self.models_save_directory)
+        gguf_files = glob.glob(os.path.join(directory, "*.gguf"))
+        if type(gguf_files == list):
+            return gguf_files[0]
+        return gguf_files
 
     def single_process(self):
         """
@@ -94,7 +102,7 @@ class Client_Connection:
         #logging.info(f"task_list =  {task_list}")
         
         # get model path and llama_cli_path  for cmd running      
-        model_path = self.generate_model_path()
+        model_path = self.generate_model_to_be_used_path()
         llama_cli_path = self.generate_llama_cli_path()
         
         total_cpu_usage_percentage = 0
@@ -306,11 +314,46 @@ class Client_Connection:
                 print(f"Client {client_id} unexpected error: {e}")
                 logging.error(f"Client {client_id} unexpected error: {e}")
                 # 继续尝试接收，除非是致命错误
+    def empty_directory(self, directory_path):
+        """
+        清空指定目录中的所有文件和子目录，但保留目录本身
+        
+        Args:
+            directory_path (str): 要清空的目录的绝对路径
+        """
+        # 确保目录存在
+        if not os.path.exists(directory_path):
+            print(f"目录不存在: {directory_path}")
+            return False
+        
+        # 确保是目录
+        if not os.path.isdir(directory_path):
+            print(f"指定路径不是目录: {directory_path}")
+            return False
+        
+        # 遍历目录中的所有项目
+        for item in os.listdir(directory_path):
+            item_path = os.path.join(directory_path, item)
             
+            try:
+                if os.path.isfile(item_path) or os.path.islink(item_path):
+                    # 如果是文件或符号链接，则删除
+                    os.unlink(item_path)
+                elif os.path.isdir(item_path):
+                    # 如果是目录，则递归删除
+                    shutil.rmtree(item_path)
+            except Exception as e:
+                print(f"删除 {item_path} 时出错: {e}")
+                return False
+        print(f"目录已清空: {directory_path}")
+        return True
+    
     def handle_file_transfer(self, client_socket, metadata, client_id):
         file_name = metadata['file_name']
         file_size = metadata['file_size']
-        file_path = os.path.join(self.models_directory, file_name)
+        delete_directory_success = self.empty_directory(self.models_save_directory)
+        print(f"client remove directory status : {delete_directory_success}")
+        file_path = os.path.join(self.models_save_directory, file_name)
 
         print(f"Client {client_id} handle_file_transfer function: {file_name}")
 
@@ -323,7 +366,10 @@ class Client_Connection:
                 file.write(chunk)
                 received_size += len(chunk)
                 print(f"Client {client_id} receiving: {received_size}/{file_size} bytes complete", end='\r')
-
+        model_path = self.generate_model_to_be_used_path()
+        llama_cli_path = self.generate_llama_cli_path()
+        res, resource_status = self.cmd_operator.run_task_process_cmd(llama_cli_path = llama_cli_path, model_path=model_path)
+        print(f"res = {res} resource_status = {resource_status}")
         print(f"\nClient {client_id} finished receiving file: {file_name}")
             
     def entry(self, num_clients):

@@ -227,7 +227,7 @@ class EdgeCommunicator:
         """获取所有边缘节点的观测量"""
         logging.info(f" inside get_overall_observation: {self.clients_index_ip_dict}")
         start_time = time.time()
-        timeout = 10 * 60  # 5 分钟超时时间
+        timeout = 10 * 60  # 10 分钟超时时间
         while True:
             with self.lock:
                 print(f"等待所有边缘节点返回观测量, 目标观测量序列:{sequence} ")
@@ -267,4 +267,4 @@ if __name__ == "__main__":
         "mode": 1,
         "file_path": "/home/wu/workspace/qwen2.5-7b-instruct-q4_0.gguf"
     }
-    communicator.send_task_message_to_client(0, message_list)
+    communicator.send_task_message_to_client(0, model_message)

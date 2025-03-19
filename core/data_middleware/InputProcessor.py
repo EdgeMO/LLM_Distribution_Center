@@ -14,7 +14,7 @@ class InputProcessor:
     """
     regulate the input data from different sources and generate output data compatible for the algorithm input
     """
-    def __init__(self, file_path = "/home/wu/workspace/LLM_Distribution_Center/data/example.csv"):
+    def __init__(self, file_path = "data/example.csv"):
         """
         Args:
             file_path (_type_): local file path
@@ -297,7 +297,7 @@ class InputProcessor:
         return output
     
 if __name__ == "__main__":
-    input = InputProcessor('/home/wu/workspace/LLM_Distribution_Center/data/example.csv')
+    input = InputProcessor('data/example.csv')
     res = input.generate_task_set_for_each_timestamp(task_num = 10)
     res2 = input.generate_query_word_from_task_type(2)
     test_text = "What is the impact of deep learning on modern AI applications?"

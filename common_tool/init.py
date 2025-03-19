@@ -6,7 +6,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 sys.path.append(current_working_directory)
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
-from common_tool.plot import *
+#from common_tool.plot import *
 from config.type import ModelInfo
         
         
@@ -61,21 +61,21 @@ def create_model_info_from_dict(model_dict, id_value):
         model_name= model_name
     )
 
-def model_init(model_perpelexity_log_path='model_perplexity_metric.log'):
-    """ init model list from perplexity_log file"""
-    with open(model_perpelexity_log_path, 'r', encoding='utf-8') as f:
-        log_content = f.read()
+# def model_init(model_perpelexity_log_path='metrics/model_perplexity_metric.log'):
+#     """ init model list from perplexity_log file"""
+#     with open(model_perpelexity_log_path, 'r', encoding='utf-8') as f:
+#         log_content = f.read()
 
-    models_data = parse_log_file(log_content)
-    model_list = []
-    for id,model_dict in enumerate(models_data,start=1):
-        model_info = create_model_info_from_dict(model_dict, id_value=id)
-        model_list.append(model_info)
-    return model_list
+#     models_data = parse_log_file(log_content)
+#     model_list = []
+#     for id,model_dict in enumerate(models_data,start=1):
+#         model_info = create_model_info_from_dict(model_dict, id_value=id)
+#         model_list.append(model_info)
+#     return model_list
     pass
 
 if __name__ == "__main__":
-    model_init()
+    #model_init()
     
     pass
     

@@ -58,7 +58,7 @@ class CMD:
     def __init__(self):
         
         pass
-    def run_task_process_cmd(self,query_prefix,query_word,llama_cli_path,model_path):
+    def run_task_process_cmd(self,llama_cli_path,model_path, query_prefix = 'please translate the sentence in english',query_word="我是谁?"):
         """ for edge node to run task process command
 
         Args:

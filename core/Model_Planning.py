@@ -2,6 +2,7 @@ import os
 import sys
 import time
 current_working_directory = os.getcwd()
+import csv
 import numpy as np
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
@@ -13,10 +14,8 @@ from Active_Inference.Model_Planning import ActiveInferenceTaskAllocation,ModelI
 from data_middleware.InputProcessor import InputProcessor
 from data_middleware.OutputProcessor import OutputProcessor
 # 负责整体节点的调度
-import logging
 from config.type import ModelInfo
 # 在文件开头配置日志记录
-logging.basicConfig(filename='core_process.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 class Core:
     def __init__(self):
         self.num_edge_nodes = 1
@@ -26,6 +25,7 @@ class Core:
         self.center = EdgeCommunicator(config_file_path='config/Running_config.json')
         self.ouput_processor = OutputProcessor(config_file_path='config/Running_config.json')
         self.allocator = ActiveInferenceTaskAllocation(self.num_edge_nodes, self.input_num_features)
+        self.core_metrics_record_file_path = 'metrics/core/core_metrics.csv'
     def wrapper_for_task_distribution(self,assignments, formated_input_for_algorithm, task_set):
         
         # 构建任务分配的字典
@@ -48,7 +48,7 @@ class Core:
         self.center.establish_connection()
         for sequence in range(300):
             # 生成当前时刻下的任务集合
-            task_set = self.input_generator.generate_task_set_for_each_timestamp(2)
+            task_set = self.input_generator.generate_task_set_for_each_timestamp(1)
             formated_input_for_algorithm = []
             """            
             {
@@ -83,7 +83,6 @@ class Core:
                 # ID 可以保持为字符串，因为它不会用作特征
                 temp_input_features['id'] = task_id
                 formated_input_for_algorithm.append(temp_input_features)
-            logging.info(f"sequence {sequence} formated_input_for_algorithm = {formated_input_for_algorithm}")
             
             # 定义预期的特征名称和顺序
             feature_names = [
@@ -123,9 +122,10 @@ class Core:
                 message['sequence'] = sequence
                 message['timestamp'] = time.time()
                 self.center.send_task_message_to_client(edge_id, message)
-            
-            # 生成当前环境观测量，只有当所有边缘节点都返回了 sequence 之后才能进行下一步
+            task_distribution_start_time = time.time()
+            # 阻塞生成当前环境观测量，只有当所有边缘节点都返回了 sequence 之后才能进行下一步
             observation = self.center.get_overall_observation(sequence)
+            task_distribution_end_time = time.time()
             print(f"第 {sequence} 个时间戳的观测结果 {observation}:")
             # 生成算法适配的观测量数据结构
             update_system_observation = []
@@ -143,9 +143,63 @@ class Core:
                     if 'throughput' in key:
                         temp_dict['avg_throughput'] = value
                 update_system_observation.append(temp_dict)
-            
+            core_data_need_to_record = {}
+            core_data_need_to_record['task_inference_time'] = task_distribution_end_time - task_distribution_start_time
+            core_data_need_to_record['edge_observation'] = update_system_observation
+            core_data_need_to_record['sequence'] = sequence
+            print(core_data_need_to_record)
+            self.record_observation_to_csv(core_data_need_to_record)
             self.allocator.feedback(update_system_observation)
+
+    def record_observation_to_csv(self, data, file_path='metrics/core/core_metrics.csv'):
+        """
+        将观测数据写入CSV文件
+        
+        Args:
+            data: 包含观测数据的字典
+            file_path: CSV文件路径
+        """
+        # 确保目录存在
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
+        try:
+            # 处理嵌套结构，创建适合CSV的平面数据结构
+            rows_to_write = []
             
+            # 提取基本数据
+            base_data = {
+                'task_inference_time': data['task_inference_time'],
+                'sequence': data['sequence']
+            }
+            
+            # 为每个edge观测创建一行数据
+            for edge_obs in data['edge_observation']:
+                row = base_data.copy()  # 复制基本数据
+                row.update(edge_obs)    # 添加edge观测数据
+                rows_to_write.append(row)
+            
+            # 检查文件是否存在
+            file_exists = os.path.isfile(file_path)
+            
+            # 写入CSV
+            with open(file_path, 'a+', newline='') as csvfile:
+                if rows_to_write:
+                    fieldnames = list(rows_to_write[0].keys())
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    
+                    # 如果文件不存在，写入表头
+                    if not file_exists:
+                        writer.writeheader()
+                    
+                    # 写入所有行
+                    writer.writerows(rows_to_write)
+                    
+                    print(f"数据已成功追加到 {file_path}")
+                else:
+                    print("没有数据可写入")
+        
+        except Exception as e:
+            print(f"写入CSV文件时出错: {e}")
             
 if __name__ == "__main__":
     core = Core()
