@@ -1,3 +1,4 @@
+
 import threading
 import time
 import datetime
@@ -58,6 +59,8 @@ class Client_Connection:
         self.client_sum_batch_throughput_score = 0
         self.client_task_num_batch = []
         self.record_metrics_file_path = 'metrics/client/client_metrics.csv'
+        
+        self.data_need_to_record = {}
         
         
         
@@ -167,6 +170,7 @@ class Client_Connection:
             "client_sum_batch_throughput_score":self.client_sum_batch_throughput_score,
             "client_task_num_batch":self.client_task_num_batch
         }
+        self.data_need_to_record = data_need_to_record
         # 检查文件是否存在
         file_exists = os.path.isfile(self.record_metrics_file_path)
         

@@ -296,7 +296,301 @@ def create_word_friendly_html_table(models_dict):
     
     html_content += "</table>"
     return html_content
+def generate_figure(models_data):
+    df = pd.DataFrame(models_data)
 
+    # 计算token生成时间
+    df['token_generation_time'] = df['total_time_ms'] / df['total_tokens']
+
+    # 自定义排序函数，确保F16在末尾
+    def quantization_sort_key(quant_str):
+        if 'F16' in quant_str or 'f16' in quant_str:
+            return 100  # 确保F16在末尾
+        match = re.search(r'Q(\d+)', quant_str)
+        if match:
+            return int(match.group(1))
+        return 99  # 其他格式放在F16之前
+
+    # 添加排序键
+    df['quant_sort_key'] = df['quantization'].apply(quantization_sort_key)
+
+    # 按量化级别排序
+    df = df.sort_values('quant_sort_key')
+
+    # 提取唯一的量化方法并排序
+    quant_methods = df['quantization'].unique()
+    
+    # 设置中文字体
+    plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial']
+    plt.rcParams['axes.unicode_minus'] = False
+
+    # 设置不同模型的标记和颜色
+    base_models = df['base_model'].unique()
+    markers = ['o', 's', '^', 'D', 'v', '*', 'p', 'h']
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
+
+    # 创建模型到标记和颜色的映射
+    model_markers = {model: markers[i % len(markers)] for i, model in enumerate(base_models)}
+    model_colors = {model: colors[i % len(colors)] for i, model in enumerate(base_models)}
+
+    # 创建图形
+    fig_width = 12
+    fig_height = 6
+
+    # 1. 绘制困惑度(PPL)对比图
+    plt.figure(figsize=(fig_width, fig_height))
+    
+    # 创建横轴位置
+    x_positions = np.arange(len(quant_methods)) * 1.5  # 增加间距
+    
+    # 创建x轴标签位置的映射
+    x_ticks_map = {method: pos for method, pos in zip(quant_methods, x_positions)}
+    
+    for model in base_models:
+        model_data = df[df['base_model'] == model]
+        # 仅绘制散点，不连线
+        for _, row in model_data.iterrows():
+            plt.scatter(
+                x_ticks_map[row['quantization']], 
+                row['ppl'],
+                marker=model_markers[model], 
+                color=model_colors[model],
+                s=100,  # 增大点的大小
+                label=model if row['quantization'] == model_data['quantization'].iloc[0] else ""  # 只为每个模型添加一次图例
+            )
+
+    plt.title('不同量化方法对困惑度(PPL)的影响', fontsize=16)
+    plt.xlabel('量化方法', fontsize=14)
+    plt.ylabel('困惑度 (PPL)', fontsize=14)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.xticks(x_positions, quant_methods, rotation=45)
+    
+    # 去除重复的图例
+    handles, labels = plt.gca().get_legend_handles_labels()
+    unique = [(h, l) for i, (h, l) in enumerate(zip(handles, labels)) if l not in labels[:i]]
+    plt.legend(*zip(*unique), title='基础模型', fontsize=12)
+    
+    plt.tight_layout()
+    plt.savefig('困惑度对比图.png', dpi=300, bbox_inches='tight')
+    plt.close()
+
+    # 2. 绘制加载时间对比图
+    plt.figure(figsize=(fig_width, fig_height))
+    
+    # 获取加载时间数据范围
+    load_times_sec = df['load_time_ms'].values / 1000
+    max_load_time = max(load_times_sec)
+    
+    for model in base_models:
+        model_data = df[df['base_model'] == model]
+        # 仅绘制散点，不连线
+        for _, row in model_data.iterrows():
+            plt.scatter(
+                x_ticks_map[row['quantization']], 
+                row['load_time_ms'] / 1000,
+                marker=model_markers[model], 
+                color=model_colors[model],
+                s=100,  # 增大点的大小
+                label=model if row['quantization'] == model_data['quantization'].iloc[0] else ""
+            )
+
+    plt.title('不同量化方法对模型加载时间的影响', fontsize=16)
+    plt.xlabel('量化方法', fontsize=14)
+    plt.ylabel('加载时间 (秒)', fontsize=14)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.xticks(x_positions, quant_methods, rotation=45)
+    
+    # 调整Y轴刻度，增加0-100秒区间的区分度
+    if max_load_time > 100:
+        # 使用非线性刻度，增加底部区间的区分度
+        plt.yscale('symlog', linthresh=100)  # linthresh定义线性区域的阈值
+        
+        # 手动设置刻度，增加0-100区间的刻度密度
+        y_ticks = list(range(0, 101, 20)) + list(range(200, int(max_load_time) + 100, 100))
+        plt.yticks(y_ticks)
+    else:
+        # 如果所有数据都在100秒以内，使用线性刻度
+        plt.ylim(0, max(100, max_load_time * 1.1))
+        
+        # 增加刻度密度
+        plt.gca().yaxis.set_major_locator(MultipleLocator(10))  # 每10秒一个主刻度
+        plt.gca().yaxis.set_minor_locator(MultipleLocator(5))   # 每5秒一个次刻度
+    
+    # 去除重复的图例
+    handles, labels = plt.gca().get_legend_handles_labels()
+    unique = [(h, l) for i, (h, l) in enumerate(zip(handles, labels)) if l not in labels[:i]]
+    plt.legend(*zip(*unique), title='基础模型', fontsize=12)
+    
+    plt.tight_layout()
+    plt.savefig('加载时间对比图.png', dpi=300, bbox_inches='tight')
+    plt.close()
+
+    # 3. 绘制Token生成时间对比图
+    plt.figure(figsize=(fig_width, fig_height))
+    
+    # 获取token生成时间数据范围
+    token_times = df['token_generation_time'].values
+    max_token_time = max(token_times)
+    
+    for model in base_models:
+        model_data = df[df['base_model'] == model]
+        # 仅绘制散点，不连线
+        for _, row in model_data.iterrows():
+            plt.scatter(
+                x_ticks_map[row['quantization']], 
+                row['token_generation_time'],
+                marker=model_markers[model], 
+                color=model_colors[model],
+                s=100,  # 增大点的大小
+                label=model if row['quantization'] == model_data['quantization'].iloc[0] else ""
+            )
+
+    plt.title('不同量化方法对Token生成时间的影响', fontsize=16)
+    plt.xlabel('量化方法', fontsize=14)
+    plt.ylabel('每Token生成时间 (毫秒)', fontsize=14)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.xticks(x_positions, quant_methods, rotation=45)
+    
+    # 调整Y轴刻度，增加0-200毫秒区间的区分度
+    if max_token_time > 200:
+        # 使用非线性刻度，增加底部区间的区分度
+        plt.yscale('symlog', linthresh=200)  # linthresh定义线性区域的阈值
+        
+        # 手动设置刻度，增加0-200区间的刻度密度
+        y_ticks = list(range(0, 201, 25)) + list(range(300, int(max_token_time) + 100, 100))
+        plt.yticks(y_ticks)
+    else:
+        # 如果所有数据都在200毫秒以内，使用线性刻度
+        plt.ylim(0, max(200, max_token_time * 1.1))
+        
+        # 增加刻度密度
+        plt.gca().yaxis.set_major_locator(MultipleLocator(25))  # 每25毫秒一个主刻度
+        plt.gca().yaxis.set_minor_locator(MultipleLocator(5))   # 每5毫秒一个次刻度
+    
+    # 去除重复的图例
+    handles, labels = plt.gca().get_legend_handles_labels()
+    unique = [(h, l) for i, (h, l) in enumerate(zip(handles, labels)) if l not in labels[:i]]
+    plt.legend(*zip(*unique), title='基础模型', fontsize=12)
+    
+    plt.tight_layout()
+    plt.savefig('Token生成时间对比图.png', dpi=300, bbox_inches='tight')
+    plt.close()
+
+    # 4. 绘制综合对比图（三个指标在一起）
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+    # PPL对比
+    ax = axes[0]
+    for model in base_models:
+        model_data = df[df['base_model'] == model]
+        # 仅绘制散点，不连线
+        for _, row in model_data.iterrows():
+            ax.scatter(
+                x_ticks_map[row['quantization']], 
+                row['ppl'],
+                marker=model_markers[model], 
+                color=model_colors[model],
+                s=80,  # 稍微小一点的点
+                label=model if row['quantization'] == model_data['quantization'].iloc[0] else ""
+            )
+        
+    ax.set_title('困惑度(PPL)对比', fontsize=14)
+    ax.set_xlabel('量化方法', fontsize=12)
+    ax.set_ylabel('困惑度 (PPL)', fontsize=12)
+    ax.grid(True, linestyle='--', alpha=0.7)
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(quant_methods, rotation=45)
+
+    # 加载时间对比
+    ax = axes[1]
+    for model in base_models:
+        model_data = df[df['base_model'] == model]
+        # 仅绘制散点，不连线
+        for _, row in model_data.iterrows():
+            ax.scatter(
+                x_ticks_map[row['quantization']], 
+                row['load_time_ms'] / 1000,
+                marker=model_markers[model], 
+                color=model_colors[model],
+                s=80,
+                label=model if row['quantization'] == model_data['quantization'].iloc[0] else ""
+            )
+        
+    ax.set_title('模型加载时间对比', fontsize=14)
+    ax.set_xlabel('量化方法', fontsize=12)
+    ax.set_ylabel('加载时间 (秒)', fontsize=12)
+    ax.grid(True, linestyle='--', alpha=0.7)
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(quant_methods, rotation=45)
+    
+    # 调整Y轴刻度，增加0-100秒区间的区分度
+    if max_load_time > 100:
+        # 使用非线性刻度，增加底部区间的区分度
+        ax.set_yscale('symlog', linthresh=100)  # linthresh定义线性区域的阈值
+        
+        # 手动设置刻度，增加0-100区间的刻度密度
+        y_ticks = list(range(0, 101, 20)) + list(range(200, int(max_load_time) + 100, 100))
+        ax.set_yticks(y_ticks)
+    else:
+        # 如果所有数据都在100秒以内，使用线性刻度
+        ax.set_ylim(0, max(100, max_load_time * 1.1))
+        
+        # 增加刻度密度
+        ax.yaxis.set_major_locator(MultipleLocator(10))  # 每10秒一个主刻度
+        ax.yaxis.set_minor_locator(MultipleLocator(5))   # 每5秒一个次刻度
+
+    # Token生成时间对比
+    ax = axes[2]
+    for model in base_models:
+        model_data = df[df['base_model'] == model]
+        # 仅绘制散点，不连线
+        for _, row in model_data.iterrows():
+            ax.scatter(
+                x_ticks_map[row['quantization']], 
+                row['token_generation_time'],
+                marker=model_markers[model], 
+                color=model_colors[model],
+                s=80,
+                label=model if row['quantization'] == model_data['quantization'].iloc[0] else ""
+            )
+        
+    ax.set_title('Token生成时间对比', fontsize=14)
+    ax.set_xlabel('量化方法', fontsize=12)
+    ax.set_ylabel('每Token生成时间 (毫秒)', fontsize=12)
+    ax.grid(True, linestyle='--', alpha=0.7)
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(quant_methods, rotation=45)
+    
+    # 调整Y轴刻度，增加0-200毫秒区间的区分度
+    if max_token_time > 200:
+        # 使用非线性刻度，增加底部区间的区分度
+        ax.set_yscale('symlog', linthresh=200)  # linthresh定义线性区域的阈值
+        
+        # 手动设置刻度，增加0-200区间的刻度密度
+        y_ticks = list(range(0, 201, 25)) + list(range(300, int(max_token_time) + 100, 100))
+        ax.set_yticks(y_ticks)
+    else:
+        # 如果所有数据都在200毫秒以内，使用线性刻度
+        ax.set_ylim(0, max(200, max_token_time * 1.1))
+        
+        # 增加刻度密度
+        ax.yaxis.set_major_locator(MultipleLocator(25))  # 每25毫秒一个主刻度
+        ax.yaxis.set_minor_locator(MultipleLocator(5))   # 每5毫秒一个次刻度
+
+    # 只在最后一个子图上添加图例
+    handles, labels = [], []
+    for model in base_models:
+        handles.append(plt.Line2D([0], [0], marker=model_markers[model], color=model_colors[model], 
+                                 linestyle='None', markersize=8, label=model))
+        labels.append(model)
+    
+    fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 0), 
+            ncol=len(base_models), title='基础模型', fontsize=12)
+
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.2)  # 为图例留出空间
+    plt.savefig('量化方法综合性能对比图.png', dpi=300, bbox_inches='tight')
+    plt.show()
 
 def parse_log_file(log_content):
     """
@@ -485,1062 +779,6 @@ def process_log_file(log_file_path):
         traceback.print_exc()
         return [], {}
 
-
-def plot_model_size_vs_ppl(models_data, output_file='model_size_vs_ppl.png'):
-    """
-    绘制模型大小与PPL关系图，特别增大横轴2.0-5.0区间和纵轴7.5-25区间的显示长度
-    
-    Args:
-        models_data: 包含模型信息的字典列表
-        output_file: 输出图像文件名
-    """
-    # 将数据转换为DataFrame
-    df = pd.DataFrame(models_data)
-    
-    # 检查必要的列是否存在
-    required_cols = ['base_model', 'model_size_gb', 'ppl', 'quantization']
-    missing_cols = [col for col in required_cols if col not in df.columns]
-    if missing_cols:
-        print(f"Error: Missing required columns: {missing_cols}")
-        return
-    
-    # 设置超大图表尺寸，提供极大的显示空间
-    plt.figure(figsize=(36, 20))  # 极大尺寸
-    plt.style.use('ggplot')
-    
-    # 为不同的base_model分配不同的颜色和标记
-    unique_models = df['base_model'].unique()
-    markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', 'h', 'H', '+', 'x', 'd']
-    if len(markers) < len(unique_models):
-        markers = markers * (len(unique_models) // len(markers) + 1)
-    
-    # 颜色映射
-    colors = plt.cm.tab10(np.linspace(0, 1, len(unique_models)))
-    
-    # 为每个base_model绘制一条线
-    for i, (model, model_df) in enumerate(df.groupby('base_model')):
-        # 按model_size_gb排序
-        model_df = model_df.sort_values('model_size_gb')
-        
-        # 绘制线条
-        plt.plot(model_df['model_size_gb'], model_df['ppl'], 
-                 linestyle='-', 
-                 color=colors[i], 
-                 linewidth=3,  # 增加线宽
-                 alpha=0.7,
-                 zorder=1)
-        
-        # 绘制散点
-        scatter = plt.scatter(model_df['model_size_gb'], model_df['ppl'], 
-                   marker=markers[i % len(markers)], 
-                   color=colors[i], 
-                   s=250,  # 增大点的大小
-                   label=model,
-                   edgecolor='white',
-                   linewidth=2,
-                   alpha=0.9,
-                   zorder=2)
-        
-        # 使用不同位置标注量化版本，避免重叠
-        label_positions = ['top', 'bottom', 'left', 'right', 'top-right', 'top-left', 'bottom-right', 'bottom-left']
-        position_index = 0
-        
-        for j, row in model_df.iterrows():
-            x, y = row['model_size_gb'], row['ppl']
-            
-            # 根据当前点的位置索引选择标签位置
-            position = label_positions[position_index % len(label_positions)]
-            position_index += 1
-            
-            # 增加标签偏移量，使标签与点之间的距离更大
-            if position == 'top':
-                xytext = (0, 25)  # 增加垂直偏移
-                ha = 'center'
-                va = 'bottom'
-            elif position == 'bottom':
-                xytext = (0, -25)  # 增加垂直偏移
-                ha = 'center'
-                va = 'top'
-            elif position == 'left':
-                xytext = (-25, 0)  # 增加水平偏移
-                ha = 'right'
-                va = 'center'
-            elif position == 'right':
-                xytext = (25, 0)  # 增加水平偏移
-                ha = 'left'
-                va = 'center'
-            elif position == 'top-right':
-                xytext = (25, 25)  # 增加对角线偏移
-                ha = 'left'
-                va = 'bottom'
-            elif position == 'top-left':
-                xytext = (-25, 25)  # 增加对角线偏移
-                ha = 'right'
-                va = 'bottom'
-            elif position == 'bottom-right':
-                xytext = (25, -25)  # 增加对角线偏移
-                ha = 'left'
-                va = 'top'
-            elif position == 'bottom-left':
-                xytext = (-25, -25)  # 增加对角线偏移
-                ha = 'right'
-                va = 'top'
-            
-            # 创建带有轮廓的文本，提高可读性
-            text = plt.annotate(row['quantization'], 
-                         (x, y),
-                         textcoords="offset points", 
-                         xytext=xytext,
-                         ha=ha,
-                         va=va,
-                         fontsize=14,  # 增大字体
-                         fontweight='bold',
-                         zorder=3)
-            
-            # 添加文本轮廓
-            text.set_path_effects([
-                path_effects.Stroke(linewidth=4, foreground='white'),
-                path_effects.Normal()
-            ])
-    
-    # 设置图表标题和标签
-    plt.title('Model Size vs Perplexity (PPL)', fontsize=24, fontweight='bold', pad=20)
-    plt.xlabel('Model Size (GiB)', fontsize=22, labelpad=7.5)
-    plt.ylabel('Perplexity (PPL) - Lower is Better', fontsize=22, labelpad=7.5)
-    
-    # 设置网格线
-    plt.grid(True, linestyle='--', alpha=0.6, zorder=0)
-    
-    # 获取当前的轴对象
-    ax = plt.gca()
-    
-    # 设置坐标轴范围
-    plt.xlim(0, 15)  # 固定横轴范围为 0-7.5 GiB
-    plt.ylim(10, 71)  # 固定纵轴范围为 10-55 PPL
-    
-        # 创建非均匀的横轴刻度，使 2.0-5.0 区间更宽
-    x_ticks = []
-
-    # 0-2.0 区间，每 0.5 一个刻度
-    for i in range(0, 20, 5):  # 使用整数参数
-        x_ticks.append(i/10)
-
-    # 2.0-5.0 区间，每 0.2 一个刻度，增大显示长度
-    for i in range(20, 50, 2):  # 使用整数参数
-        x_ticks.append(i/10)
-
-    # 5.0-15.0 区间，每 1.0 一个刻度
-    for i in range(50, 151, 10):  # 使用整数参数
-        x_ticks.append(i/10)
-
-    # 设置横轴刻度
-    ax.xaxis.set_major_locator(FixedLocator(x_ticks))
-
-    # 创建非均匀的纵轴刻度，使 15-25 区间更宽
-    y_ticks = []
-
-    # 10-15 区间，每 1.0 一个刻度
-    for i in range(10, 15, 1):  # 使用整数参数
-        y_ticks.append(i)
-
-    # 15-25 区间，每 0.5 一个刻度，增大显示长度
-    for i in range(150, 250, 5):  # 使用整数参数
-        y_ticks.append(i/10)
-
-    # 25-55 区间，每 5.0 一个刻度
-    for i in range(25, 56, 5):  # 使用整数参数
-        y_ticks.append(i)
-    
-    # 设置纵轴刻度
-    ax.yaxis.set_major_locator(FixedLocator(y_ticks))
-    
-    # 设置横轴刻度标签格式
-    def x_formatter(x, pos):
-        if 2.0 <= x <= 5.0:
-            return f"{x:.1f}"  # 2.0-5.0 区间显示一位小数
-        else:
-            return f"{x:.1f}" if x < 10 else f"{int(x)}"
-    
-    ax.xaxis.set_major_formatter(plt.FuncFormatter(x_formatter))
-    
-    # 设置纵轴刻度标签格式
-    def y_formatter(y, pos):
-        if 7.5 <= y <= 25:
-            return f"{y:.1f}"  # 7.5-25 区间显示一位小数
-        else:
-            return f"{int(y)}"
-    
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(y_formatter))
-    
-    # 设置次刻度
-    ax.xaxis.set_minor_locator(MultipleLocator(0.1))
-    ax.yaxis.set_minor_locator(MultipleLocator(0.1))
-    
-    # 显示次刻度，并设置它们的样式
-    ax.tick_params(which='minor', length=5, width=1.5, direction='out')
-    ax.tick_params(which='major', length=10, width=2, direction='out')
-    ax.tick_params(axis='both', labelsize=16)  # 增大刻度标签字体
-    
-    # 添加图例，放在图表外部右侧
-    legend = plt.legend(title='Base Model', fontsize=18, title_fontsize=20, 
-                loc='center left', bbox_to_anchor=(1, 0.5),
-                frameon=True, framealpha=0.9, edgecolor='gray',
-                markerscale=1.5)  # 增大图例标记
-    legend.get_frame().set_facecolor('white')
-    
-    # 添加水印
-    # plt.figtext(0.5, 0.01, "Model Performance Analysis Report", ha="center", fontsize=14, 
-    #             color="gray", alpha=0.5, style='italic')
-    
-    # 添加数据标签：显示每个模型组的最佳PPL
-    for i, (model, model_df) in enumerate(df.groupby('base_model')):
-        if not model_df.empty:
-            best_idx = model_df['ppl'].idxmin()
-            best_model = model_df.loc[best_idx]
-            plt.annotate(f"Best: {best_model['quantization']} ({best_model['ppl']:.2f})",
-                        (best_model['model_size_gb'], best_model['ppl']),
-                        textcoords="offset points",
-                        xytext=(40, -40),  # 增加偏移
-                        fontsize=16,  # 增大字体
-                        color=colors[i],
-                        bbox=dict(boxstyle="round,pad=0.4", fc="white", ec=colors[i], alpha=0.8))
-    
-    # 调整布局，留出足够的空间给图例
-    plt.tight_layout(rect=[0, 0, 0.85, 1])
-    
-    # 创建放大区域，显示重要区域
-    from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
-
-    # 创建放大区域，显示重要区域
-    from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
-    
-    # 修复：使用绝对单位而不是相对单位
-    axins = inset_axes(ax, width=8, height=6, loc="lower right", 
-                       bbox_to_anchor=(0.95, 0.35), bbox_transform=ax.transAxes)
-    
-    # 设置子图的背景颜色为浅灰色，使其与主图区分
-    axins.set_facecolor('#f8f8f8')
-    
-    # 在子图中重新绘制数据，但只显示指定区间
-    for i, (model, model_df) in enumerate(df.groupby('base_model')):
-        # 过滤出指定区间内的数据点
-        filtered_df = model_df[(model_df['model_size_gb'] >= 2.0) & 
-                              (model_df['model_size_gb'] <= 5.0) & 
-                              (model_df['ppl'] >= 15) & 
-                              (model_df['ppl'] <= 25)]
-        
-        if not filtered_df.empty:
-            # 如果数据点太多，可以考虑只绘制散点而不绘制连线
-            if len(filtered_df) > 6:
-                # 只绘制散点，不绘制连线
-                axins.scatter(filtered_df['model_size_gb'], filtered_df['ppl'], 
-                             marker=markers[i % len(markers)], 
-                             color=colors[i], 
-                             s=150,
-                             label=model,
-                             edgecolor='white',
-                             linewidth=1.5,
-                             alpha=1.0,
-                             zorder=3)
-            else:
-                # 绘制线条（更细、更透明）
-                axins.plot(filtered_df['model_size_gb'], filtered_df['ppl'], 
-                          linestyle='--',  # 使用虚线
-                          color=colors[i], 
-                          linewidth=1.0,   # 更细的线条
-                          alpha=0.5,       # 更透明
-                          zorder=1)
-                
-                # 绘制散点
-                axins.scatter(filtered_df['model_size_gb'], filtered_df['ppl'], 
-                             marker=markers[i % len(markers)], 
-                             color=colors[i], 
-                             s=150,
-                             label=model,
-                             edgecolor='white',
-                             linewidth=1.5,
-                             alpha=1.0,
-                             zorder=3)
-            
-            # 使用智能标签放置算法，避免重叠
-            label_positions = []  # 存储已放置的标签位置
-            
-            # 为每个点添加标签
-            for _, row in filtered_df.iterrows():
-                x, y = row['model_size_gb'], row['ppl']
-                
-                # 尝试不同的位置，直到找到一个不重叠的位置
-                best_position = None
-                min_overlap = float('inf')
-                
-                # 可能的位置列表
-                positions = [
-                    (10, 10, 'left', 'bottom'),    # 右上
-                    (10, -10, 'left', 'top'),      # 右下
-                    (-10, 10, 'right', 'bottom'),  # 左上
-                    (-10, -10, 'right', 'top'),    # 左下
-                    (0, 15, 'center', 'bottom'),   # 上
-                    (0, -15, 'center', 'top'),     # 下
-                    (15, 0, 'left', 'center'),     # 右
-                    (-15, 0, 'right', 'center')    # 左
-                ]
-                
-                for dx, dy, ha, va in positions:
-                    # 计算新位置
-                    new_pos = (x + dx/100, y + dy/100)  # 转换为数据坐标
-                    
-                    # 计算与其他标签的重叠
-                    overlap = sum(
-                        abs(new_pos[0] - pos[0]) < 0.1 and abs(new_pos[1] - pos[1]) < 0.2
-                        for pos in label_positions
-                    )
-                    
-                    if overlap < min_overlap:
-                        min_overlap = overlap
-                        best_position = (dx, dy, ha, va)
-                
-                # 如果所有位置都有重叠，可以跳过这个标签
-                if min_overlap > 0 and len(filtered_df) > 5:
-                    continue
-                
-                # 使用最佳位置
-                dx, dy, ha, va = best_position
-                label_positions.append((x + dx/100, y + dy/100))
-                
-                # 添加标签
-                text = axins.annotate(row['quantization'], 
-                                     (x, y),
-                                     textcoords="offset points", 
-                                     xytext=(dx, dy),
-                                     ha=ha,
-                                     va=va,
-                                     fontsize=11,
-                                     fontweight='bold')
-                
-                # 添加文本轮廓
-                text.set_path_effects([
-                    path_effects.Stroke(linewidth=3, foreground='white'),
-                    path_effects.Normal()
-                ])
-    
-    # 设置子图的坐标轴范围
-    axins.set_xlim(2.0, 5.0)
-    axins.set_ylim(15, 25)
-    
-    # 设置子图的刻度
-    axins.xaxis.set_major_locator(MultipleLocator(0.5))
-    axins.yaxis.set_major_locator(MultipleLocator(1.0))
-    axins.xaxis.set_minor_locator(MultipleLocator(0.1))
-    axins.yaxis.set_minor_locator(MultipleLocator(0.2))
-    
-    # 设置子图网格
-    axins.grid(True, linestyle='--', alpha=0.3, zorder=0)
-    
-    # 添加子图标题
-    axins.set_title('Zoomed Region (2.0-5.0 GiB, 15-25 PPL)', fontsize=14, pad=10)
-    
-    # 设置子图刻度标签格式
-    axins.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
-    axins.yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
-    
-    try:
-        # 添加连接线，指示子图区域，使用更细、更浅的线条
-        mark_inset(ax, axins, loc1=2, loc2=4, fc="none", ec="0.7", lw=1)
-    except:
-        print("Warning: Could not add connecting lines to inset axes")
-    
-    # 保存图表
-    plt.savefig(output_file, dpi=400, bbox_inches='tight')  # 增加DPI
-    print(f"Chart saved to '{output_file}'")
-    plt.close()
-    
-def plot_model_size_vs_load_time(models_data, output_file='model_size_vs_load_time.png'):
-    """
-    绘制模型大小与加载时间关系图，特别增大横轴1.5-5.5区间和纵轴30-100区间的显示长度
-    
-    Args:
-        models_data: 包含模型信息的字典列表
-        output_file: 输出图像文件名
-    """
-    # 将数据转换为DataFrame
-    df = pd.DataFrame(models_data)
-    
-    # 检查必要的列是否存在
-    required_cols = ['base_model', 'model_size_gb', 'load_time_ms', 'quantization']
-    missing_cols = [col for col in required_cols if col not in df.columns]
-    if missing_cols:
-        print(f"Error: Missing required columns: {missing_cols}")
-        return
-    
-    # 设置超大图表尺寸，提供极大的显示空间 - 增加宽度
-    plt.figure(figsize=(42, 20))  # 从36增加到42
-    plt.style.use('ggplot')
-    
-    # 为不同的base_model分配不同的颜色和标记
-    unique_models = df['base_model'].unique()
-    markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', 'h', 'H', '+', 'x', 'd']
-    if len(markers) < len(unique_models):
-        markers = markers * (len(unique_models) // len(markers) + 1)
-    
-    # 颜色映射
-    colors = plt.cm.tab10(np.linspace(0, 1, len(unique_models)))
-    
-    # 为每个base_model绘制一条线
-    for i, (model, model_df) in enumerate(df.groupby('base_model')):
-        # 按model_size_gb排序
-        model_df = model_df.sort_values('model_size_gb')
-        
-        # 将加载时间从毫秒转换为秒，使数值更易读
-        model_df['load_time_s'] = model_df['load_time_ms'] / 1000.0
-        
-        # 绘制线条
-        plt.plot(model_df['model_size_gb'], model_df['load_time_s'], 
-                 linestyle='-', 
-                 color=colors[i], 
-                 linewidth=3,  # 增加线宽
-                 alpha=0.7,
-                 zorder=1)
-        
-        # 绘制散点
-        scatter = plt.scatter(model_df['model_size_gb'], model_df['load_time_s'], 
-                   marker=markers[i % len(markers)], 
-                   color=colors[i], 
-                   s=250,  # 增大点的大小
-                   label=model,
-                   edgecolor='white',
-                   linewidth=2,
-                   alpha=0.9,
-                   zorder=2)
-        
-        # 使用不同位置标注量化版本，避免重叠
-        label_positions = ['top', 'bottom', 'left', 'right', 'top-right', 'top-left', 'bottom-right', 'bottom-left']
-        position_index = 0
-        
-        for j, row in model_df.iterrows():
-            x, y = row['model_size_gb'], row['load_time_s']
-            
-            # 根据当前点的位置索引选择标签位置
-            position = label_positions[position_index % len(label_positions)]
-            position_index += 1
-            
-            # 增加标签偏移量，使标签与点之间的距离更大
-            if position == 'top':
-                xytext = (0, 25)
-                ha = 'center'
-                va = 'bottom'
-            elif position == 'bottom':
-                xytext = (0, -25)
-                ha = 'center'
-                va = 'top'
-            elif position == 'left':
-                xytext = (-25, 0)
-                ha = 'right'
-                va = 'center'
-            elif position == 'right':
-                xytext = (25, 0)
-                ha = 'left'
-                va = 'center'
-            elif position == 'top-right':
-                xytext = (25, 25)
-                ha = 'left'
-                va = 'bottom'
-            elif position == 'top-left':
-                xytext = (-25, 25)
-                ha = 'right'
-                va = 'bottom'
-            elif position == 'bottom-right':
-                xytext = (25, -25)
-                ha = 'left'
-                va = 'top'
-            elif position == 'bottom-left':
-                xytext = (-25, -25)
-                ha = 'right'
-                va = 'top'
-            
-            # 创建带有轮廓的文本，提高可读性
-            text = plt.annotate(row['quantization'], 
-                         (x, y),
-                         textcoords="offset points", 
-                         xytext=xytext,
-                         ha=ha,
-                         va=va,
-                         fontsize=14,  # 增大字体
-                         fontweight='bold',
-                         zorder=3)
-            
-            # 添加文本轮廓
-            text.set_path_effects([
-                path_effects.Stroke(linewidth=4, foreground='white'),
-                path_effects.Normal()
-            ])
-    
-    # 设置图表标题和标签
-    plt.title('Model Size vs Load Time', fontsize=24, fontweight='bold', pad=20)
-    plt.xlabel('Model Size (GiB)', fontsize=22, labelpad=15)
-    plt.ylabel('Load Time (seconds)', fontsize=22, labelpad=15)
-    
-    # 设置网格线
-    plt.grid(True, linestyle='--', alpha=0.6, zorder=0)
-    
-    # 获取当前的轴对象
-    ax = plt.gca()
-    
-    # 设置坐标轴范围 - 缩小横轴范围以增大1.5-5.5区间的显示比例
-    plt.xlim(0, 15)  # 从15缩小到8
-    
-    # 计算纵轴范围，确保所有数据点都可见
-    y_min = 0  # 加载时间最小为0
-    if not df.empty:
-        y_max = min(df['load_time_ms'].max() / 1000.0 * 1.1, 2500)  # 限制最大值为150，增大30-100区间的显示比例
-        plt.ylim(y_min, y_max)
-    
-    # 创建非均匀的横轴刻度，特别增大1.5-5.5区间的显示长度
-    x_ticks = []
-    
-    # 0-1.5 区间，每 0.5 一个刻度
-    for i in range(0, 15, 5):
-        x_ticks.append(i/10)
-    
-    # 1.5-5.5 区间，减少刻度数量，每 0.4 一个刻度，增大显示长度
-    for i in range(15, 45, 4):  # 从2改为4，减少刻度数量
-        x_ticks.append(i/10)
-    
-    # 5.5-8.0 区间，每 0.5 一个刻度
-    for i in range(55, 81, 5):
-        x_ticks.append(i/10)
-    
-    # 设置横轴刻度
-    ax.xaxis.set_major_locator(FixedLocator(x_ticks))
-    
-    # 创建非均匀的纵轴刻度，特别增大30-100区间的显示长度
-    y_ticks = []
-    
-    # 0-30 区间，每 10 一个刻度
-    for i in range(0, 30, 10):
-        y_ticks.append(i)
-    
-    # 30-100 区间，减少刻度数量，每 10 一个刻度，增大显示长度
-    for i in range(30, 101, 10):  # 从5改为10，减少刻度数量
-        y_ticks.append(i)
-    
-    # 100以上区间，每 50 一个刻度
-    for i in range(100, int(y_max) + 50, 50):
-        if i > 100:  # 避免重复添加100
-            y_ticks.append(i)
-    
-    # 设置纵轴刻度
-    ax.yaxis.set_major_locator(FixedLocator(y_ticks))
-    
-    # 设置横轴刻度标签格式
-    def x_formatter(x, pos):
-        if 1.5 <= x <= 4.5:
-            return f"{x:.1f}"  # 1.5-5.5 区间显示一位小数
-        else:
-            return f"{x:.1f}" if x < 10 else f"{int(x)}"
-    
-    ax.xaxis.set_major_formatter(plt.FuncFormatter(x_formatter))
-    
-    # 设置纵轴刻度格式
-    def y_formatter(y, pos):
-        if 30 <= y <= 100:
-            return f"{int(y)}"  # 30-100 区间显示整数
-        else:
-            return f"{int(y)}"
-    
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(y_formatter))
-    
-    # 设置次刻度 - 减少次刻度密度，使主刻度间距更明显
-    ax.xaxis.set_minor_locator(MultipleLocator(0.2))  # 从0.1改为0.2
-    ax.yaxis.set_minor_locator(MultipleLocator(5))    # 从1改为5
-    
-    # 显示次刻度，并设置它们的样式
-    ax.tick_params(which='minor', length=5, width=1.5, direction='out')
-    ax.tick_params(which='major', length=10, width=2, direction='out')
-    ax.tick_params(axis='both', labelsize=16)  # 增大刻度标签字体
-    
-    # 添加图例，放在图表外部右侧
-    legend = plt.legend(title='Base Model', fontsize=18, title_fontsize=20, 
-                loc='center left', bbox_to_anchor=(1, 0.5),
-                frameon=True, framealpha=0.9, edgecolor='gray',
-                markerscale=1.5)  # 增大图例标记
-    legend.get_frame().set_facecolor('white')
-    
-    # 调整布局，留出足够的空间给图例，增大主图区域的水平比例
-    plt.tight_layout(rect=[0, 0, 0.88, 1])  # 从0.85改为0.88
-    
-    # 添加子图，放大显示关键区域
-    from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
-    
-    # 创建子图，专注于横轴1.5-5.5，纵轴30-100的区间 - 显著增大子图尺寸
-    # 修改bbox_to_anchor参数，将子图向右下方移动
-    axins = inset_axes(ax, width=16, height=10, loc="lower right",  
-                       bbox_to_anchor=(0.98, 0.05),  # 从(0.95, 0.35)改为(0.98, 0.05)，向右下方移动
-                       bbox_transform=ax.transAxes)
-    
-    # 设置子图的背景颜色为透明
-    axins.patch.set_alpha(0.0)  # 将背景设为完全透明
-    
-    # 在子图中重新绘制数据，但只显示指定区间
-    for i, (model, model_df) in enumerate(df.groupby('base_model')):
-        # 过滤出指定区间内的数据点
-        filtered_df = model_df[(model_df['model_size_gb'] >= 1.5) & 
-                              (model_df['model_size_gb'] <= 4.5) & 
-                              (model_df['load_time_ms'] / 1000.0 >= 30) &
-                              (model_df['load_time_ms'] / 1000.0 <= 100)]
-        
-        if not filtered_df.empty:
-            # 只绘制散点，不绘制连线，避免视觉混乱
-            axins.scatter(filtered_df['model_size_gb'], filtered_df['load_time_ms'] / 1000.0, 
-                         marker=markers[i % len(markers)], 
-                         color=colors[i], 
-                         s=200,  # 进一步增大点的大小
-                         label=model,
-                         edgecolor='white',
-                         linewidth=1.5,
-                         alpha=1.0,
-                         zorder=3)
-            
-            # 使用智能标签放置算法，避免重叠
-            label_positions = []  # 存储已放置的标签位置
-            
-            # 为每个点添加标签
-            for _, row in filtered_df.iterrows():
-                x, y = row['model_size_gb'], row['load_time_ms'] / 1000.0
-                
-                # 尝试不同的位置，直到找到一个不重叠的位置
-                best_position = None
-                min_overlap = float('inf')
-                
-                # 可能的位置列表
-                positions = [
-                    (10, 10, 'left', 'bottom'),    # 右上
-                    (10, -10, 'left', 'top'),      # 右下
-                    (-10, 10, 'right', 'bottom'),  # 左上
-                    (-10, -10, 'right', 'top'),    # 左下
-                    (0, 15, 'center', 'bottom'),   # 上
-                    (0, -15, 'center', 'top'),     # 下
-                    (15, 0, 'left', 'center'),     # 右
-                    (-15, 0, 'right', 'center')    # 左
-                ]
-                
-                for dx, dy, ha, va in positions:
-                    # 计算新位置
-                    new_pos = (x + dx/100, y + dy/5)  # 转换为数据坐标
-                    
-                    # 计算与其他标签的重叠
-                    overlap = sum(
-                        abs(new_pos[0] - pos[0]) < 0.1 and abs(new_pos[1] - pos[1]) < 2
-                        for pos in label_positions
-                    )
-                    
-                    if overlap < min_overlap:
-                        min_overlap = overlap
-                        best_position = (dx, dy, ha, va)
-                
-                # 如果所有位置都有重叠，可以跳过这个标签
-                if min_overlap > 0 and len(filtered_df) > 5:
-                    continue
-                
-                # 使用最佳位置
-                dx, dy, ha, va = best_position
-                label_positions.append((x + dx/100, y + dy/5))
-                
-                # 添加标签
-                text = axins.annotate(row['quantization'], 
-                                     (x, y),
-                                     textcoords="offset points", 
-                                     xytext=(dx, dy),
-                                     ha=ha,
-                                     va=va,
-                                     fontsize=13,  # 增大字体
-                                     fontweight='bold')
-                
-                # 添加文本轮廓
-                text.set_path_effects([
-                    path_effects.Stroke(linewidth=3, foreground='white'),
-                    path_effects.Normal()
-                ])
-    
-    # 设置子图的坐标轴范围
-    axins.set_xlim(1.5, 4.5)
-    axins.set_ylim(30, 100)
-    
-    # 设置子图的刻度 - 显著减少刻度数量，使每个刻度间距更大
-    axins.xaxis.set_major_locator(MultipleLocator(1.0))  # 从0.5改为1.0
-    axins.yaxis.set_major_locator(MultipleLocator(20))   # 从10改为20
-    
-    # 设置次级刻度，保持适当的间距
-    axins.xaxis.set_minor_locator(MultipleLocator(0.2))  # 保持0.2
-    axins.yaxis.set_minor_locator(MultipleLocator(5))    # 从2改为5
-    
-    # 设置子图网格
-    axins.grid(True, linestyle='--', alpha=0.3, zorder=0)
-    
-    # 添加子图标题
-    axins.set_title('Zoomed Region (1.5-4.5 GiB, 30-100s)', fontsize=16, pad=10)  # 增大字体
-    
-    # 设置子图刻度标签格式
-    axins.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
-    axins.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))
-    axins.tick_params(axis='both', labelsize=14)  # 增大刻度标签字体
-    
-    try:
-        # 添加连接线，指示子图区域，使用更细、更浅的线条
-        mark_inset(ax, axins, loc1=2, loc2=4, fc="none", ec="0.7", lw=1)
-    except:
-        print("Warning: Could not add connecting lines to inset axes")
-    
-    # 保存图表
-    plt.savefig(output_file, dpi=400, bbox_inches='tight')  # 增加DPI
-    print(f"Chart saved to '{output_file}'")
-    plt.close()
-
-
-def plot_model_size_vs_token_time(models_data, output_file='model_size_vs_token_time.png'):
-    """
-    绘制模型大小与每个token的处理时间关系图，特别增大横轴2.0-5.0区间的刻度显示距离
-    
-    Args:
-        models_data: 包含模型信息的字典列表
-        output_file: 输出图像文件名
-    """
-    # 将数据转换为DataFrame
-    df = pd.DataFrame(models_data)
-    
-    # 检查必要的列是否存在
-    required_cols = ['base_model', 'model_size_gb', 'total_time_ms', 'total_tokens', 'quantization']
-    missing_cols = [col for col in required_cols if col not in df.columns]
-    if missing_cols:
-        print(f"Error: Missing required columns: {missing_cols}")
-        return
-    
-    # 计算每个token的平均处理时间
-    df['ms_per_token'] = df['total_time_ms'] / df['total_tokens']
-    
-    # 设置超大图表尺寸，提供极大的显示空间 - 增加宽度，提供更多横向空间
-    plt.figure(figsize=(42, 20))  # 增加宽度从36到42
-    plt.style.use('ggplot')
-    
-    # 为不同的base_model分配不同的颜色和标记
-    unique_models = df['base_model'].unique()
-    markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', 'h', 'H', '+', 'x', 'd']
-    if len(markers) < len(unique_models):
-        markers = markers * (len(unique_models) // len(markers) + 1)
-    
-    # 颜色映射
-    colors = plt.cm.tab10(np.linspace(0, 1, len(unique_models)))
-    
-    # 为每个base_model绘制一条线
-    for i, (model, model_df) in enumerate(df.groupby('base_model')):
-        # 按model_size_gb排序
-        model_df = model_df.sort_values('model_size_gb')
-        
-        # 绘制线条
-        plt.plot(model_df['model_size_gb'], model_df['ms_per_token'], 
-                 linestyle='-', 
-                 color=colors[i], 
-                 linewidth=3,  # 增加线宽
-                 alpha=0.7,
-                 zorder=1)
-        
-        # 绘制散点
-        scatter = plt.scatter(model_df['model_size_gb'], model_df['ms_per_token'], 
-                   marker=markers[i % len(markers)], 
-                   color=colors[i], 
-                   s=250,  # 增大点的大小
-                   label=model,
-                   edgecolor='white',
-                   linewidth=2,
-                   alpha=0.9,
-                   zorder=2)
-        
-        # 使用不同位置标注量化版本，避免重叠
-        label_positions = ['top', 'bottom', 'left', 'right', 'top-right', 'top-left', 'bottom-right', 'bottom-left']
-        position_index = 0
-        
-        for j, row in model_df.iterrows():
-            x, y = row['model_size_gb'], row['ms_per_token']
-            
-            # 根据当前点的位置索引选择标签位置
-            position = label_positions[position_index % len(label_positions)]
-            position_index += 1
-            
-            # 增加标签偏移量，使标签与点之间的距离更大
-            if position == 'top':
-                xytext = (0, 25)
-                ha = 'center'
-                va = 'bottom'
-            elif position == 'bottom':
-                xytext = (0, -25)
-                ha = 'center'
-                va = 'top'
-            elif position == 'left':
-                xytext = (-25, 0)
-                ha = 'right'
-                va = 'center'
-            elif position == 'right':
-                xytext = (25, 0)
-                ha = 'left'
-                va = 'center'
-            elif position == 'top-right':
-                xytext = (25, 25)
-                ha = 'left'
-                va = 'bottom'
-            elif position == 'top-left':
-                xytext = (-25, 25)
-                ha = 'right'
-                va = 'bottom'
-            elif position == 'bottom-right':
-                xytext = (25, -25)
-                ha = 'left'
-                va = 'top'
-            elif position == 'bottom-left':
-                xytext = (-25, -25)
-                ha = 'right'
-                va = 'top'
-            
-            # 创建带有轮廓的文本，提高可读性
-            text = plt.annotate(row['quantization'], 
-                         (x, y),
-                         textcoords="offset points", 
-                         xytext=xytext,
-                         ha=ha,
-                         va=va,
-                         fontsize=14,  # 增大字体
-                         fontweight='bold',
-                         zorder=3)
-            
-            # 添加文本轮廓
-            text.set_path_effects([
-                path_effects.Stroke(linewidth=4, foreground='white'),
-                path_effects.Normal()
-            ])
-    
-    # 设置图表标题和标签
-    plt.title('Model Size vs Token Processing Time', fontsize=24, fontweight='bold', pad=20)
-    plt.xlabel('Model Size (GiB)', fontsize=22, labelpad=15)
-    plt.ylabel('Time per Token (ms)', fontsize=22, labelpad=15)
-    
-    # 设置网格线
-    plt.grid(True, linestyle='--', alpha=0.6, zorder=0)
-    
-    # 获取当前的轴对象
-    ax = plt.gca()
-    
-    # 设置坐标轴范围 - 缩小横轴范围，增大2.0-5.0区间的显示比例
-    plt.xlim(0, 15.0)  # 减小横轴范围从7.5到6.0，使得2.0-5.0区间占据更大比例
-    
-    # 计算纵轴范围，确保所有数据点都可见
-    y_min = 0  # 处理时间最小为0
-    if not df.empty:
-        y_max = df['ms_per_token'].max() * 1.1  # 增加10%的边距
-        plt.ylim(y_min, y_max)
-    
-    # 创建非均匀的横轴刻度，特别增大2.0-5.0区间的显示长度
-    x_ticks = []
-    
-    # 0-2.0 区间，每 0.5 一个刻度
-    for i in range(0, 20, 5):
-        x_ticks.append(i/10)
-    
-    # 2.0-5.0 区间，减少刻度数量，使每个刻度间距更大
-    for i in range(20, 50, 3):  # 从每0.1一个刻度改为每0.3一个刻度
-        x_ticks.append(i/10)
-    
-    # 5.0-6.0 区间，每 0.5 一个刻度
-    for i in range(50, 61, 5):
-        x_ticks.append(i/10)
-    
-    # 设置横轴刻度
-    ax.xaxis.set_major_locator(FixedLocator(x_ticks))
-    
-    # 创建非均匀的纵轴刻度，特别增大0-200区间的显示长度
-    y_ticks = []
-    
-    # 0-200 区间，每 20 一个刻度，减少刻度数量
-    for i in range(0, 201, 20):
-        y_ticks.append(i)
-    
-    # 200以上区间，每 100 一个刻度
-    max_token_time = int(np.ceil(df['ms_per_token'].max()))
-    if max_token_time > 200:
-        for i in range(200, max_token_time + 100, 100):
-            y_ticks.append(i)
-    
-    # 设置纵轴刻度
-    ax.yaxis.set_major_locator(FixedLocator(y_ticks))
-    
-    # 设置横轴刻度标签格式
-    def x_formatter(x, pos):
-        if 2.0 <= x <= 5.0:
-            return f"{x:.1f}"  # 2.0-5.0 区间显示一位小数
-        else:
-            return f"{x:.1f}" if x < 10 else f"{int(x)}"
-    
-    ax.xaxis.set_major_formatter(plt.FuncFormatter(x_formatter))
-    
-    # 设置纵轴刻度格式
-    def y_formatter(y, pos):
-        if y <= 200:
-            return f"{int(y)}"  # 0-200 区间显示整数
-        else:
-            return f"{int(y)}"
-    
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(y_formatter))
-    
-    # 设置次刻度 - 减少次刻度数量，使主刻度间距更明显
-    ax.xaxis.set_minor_locator(MultipleLocator(0.1))  # 保持0.1的次刻度
-    ax.yaxis.set_minor_locator(MultipleLocator(10))  # 从5改为10，减少次刻度数量
-    
-    # 显示次刻度，并设置它们的样式
-    ax.tick_params(which='minor', length=5, width=1.5, direction='out')
-    ax.tick_params(which='major', length=10, width=2, direction='out')
-    ax.tick_params(axis='both', labelsize=16)  # 增大刻度标签字体
-    
-    # 添加图例，放在图表外部右侧
-    legend = plt.legend(title='Base Model', fontsize=18, title_fontsize=20, 
-                loc='center left', bbox_to_anchor=(1, 0.5),
-                frameon=True, framealpha=0.9, edgecolor='gray',
-                markerscale=1.5)  # 增大图例标记
-    legend.get_frame().set_facecolor('white')
-    
-    # 添加数据标签：显示每个模型组的最快处理时间
-    # for i, (model, model_df) in enumerate(df.groupby('base_model')):
-    #     if not model_df.empty:
-    #         best_idx = model_df['ms_per_token'].idxmin()
-    #         best_model = model_df.loc[best_idx]
-    #         plt.annotate(f"Fastest: {best_model['quantization']} ({best_model['ms_per_token']:.2f}ms)",
-    #                     (best_model['model_size_gb'], best_model['ms_per_token']),
-    #                     textcoords="offset points",
-    #                     xytext=(40, -40),  # 增加偏移
-    #                     fontsize=16,  # 增大字体
-    #                     color=colors[i],
-    #                     bbox=dict(boxstyle="round,pad=0.4", fc="white", ec=colors[i], alpha=0.8))
-    
-    # 调整布局，留出足够的空间给图例，同时增大主图区域的水平比例
-    plt.tight_layout(rect=[0, 0, 0.88, 1])  # 增加水平空间比例从0.85到0.88
-    
-    # 添加子图，放大显示关键区域
-    from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
-    
-    # 创建子图，专注于横轴2.0-5.0，纵轴0-200的区间
-    axins = inset_axes(ax, width=10, height=7, loc="lower right",  # 增加子图尺寸
-                       bbox_to_anchor=(0.95, 0.35), bbox_transform=ax.transAxes)
-    
-    # 设置子图的背景颜色为浅灰色，使其与主图区分
-    axins.set_facecolor('#f8f8f8')
-    axins.patch.set_alpha(0.0)
-    # 在子图中重新绘制数据，但只显示指定区间
-    for i, (model, model_df) in enumerate(df.groupby('base_model')):
-        # 过滤出指定区间内的数据点
-        filtered_df = model_df[(model_df['model_size_gb'] >= 2.0) & 
-                              (model_df['model_size_gb'] <= 5.0) & 
-                              (model_df['ms_per_token'] <= 200)]
-    
-        if not filtered_df.empty:
-            # 绘制散点
-            axins.scatter(filtered_df['model_size_gb'], filtered_df['ms_per_token'], 
-                         marker=markers[i % len(markers)], 
-                         color=colors[i], 
-                         s=180,  # 增大点的大小
-                         label=model,
-                         edgecolor='white',
-                         linewidth=1.5,
-                         alpha=1.0,
-                         zorder=3)
-            
-            # 使用智能标签放置算法，避免重叠
-            label_positions = []  # 存储已放置的标签位置
-            
-            # 为每个点添加标签
-            for _, row in filtered_df.iterrows():
-                x, y = row['model_size_gb'], row['ms_per_token']
-                
-                # 尝试不同的位置，直到找到一个不重叠的位置
-                best_position = None
-                min_overlap = float('inf')
-                
-                # 可能的位置列表
-                positions = [
-                    (10, 10, 'left', 'bottom'),    # 右上
-                    (10, -10, 'left', 'top'),      # 右下
-                    (-10, 10, 'right', 'bottom'),  # 左上
-                    (-10, -10, 'right', 'top'),    # 左下
-                    (0, 15, 'center', 'bottom'),   # 上
-                    (0, -15, 'center', 'top'),     # 下
-                    (15, 0, 'left', 'center'),     # 右
-                    (-15, 0, 'right', 'center')    # 左
-                ]
-                
-                for dx, dy, ha, va in positions:
-                    # 计算新位置
-                    new_pos = (x + dx/100, y + dy/10)  # 转换为数据坐标
-                    
-                    # 计算与其他标签的重叠
-                    overlap = sum(
-                        abs(new_pos[0] - pos[0]) < 0.1 and abs(new_pos[1] - pos[1]) < 10
-                        for pos in label_positions
-                    )
-                    
-                    if overlap < min_overlap:
-                        min_overlap = overlap
-                        best_position = (dx, dy, ha, va)
-                
-                # 如果所有位置都有重叠，可以跳过这个标签
-                if min_overlap > 0 and len(filtered_df) > 5:
-                    continue
-                
-                # 使用最佳位置
-                dx, dy, ha, va = best_position
-                label_positions.append((x + dx/100, y + dy/10))
-                
-                # 添加标签
-                text = axins.annotate(row['quantization'], 
-                                     (x, y),
-                                     textcoords="offset points", 
-                                     xytext=(dx, dy),
-                                     ha=ha,
-                                     va=va,
-                                     fontsize=11,
-                                     fontweight='bold')
-                
-                # 添加文本轮廓
-                text.set_path_effects([
-                    path_effects.Stroke(linewidth=3, foreground='white'),
-                    path_effects.Normal()
-                ])
-    
-    # 设置子图的坐标轴范围
-    axins.set_xlim(2.0, 5.0)
-    axins.set_ylim(0, 200)
-    
-    # 设置子图的刻度 - 减少刻度数量，使每个刻度间距更大
-    axins.xaxis.set_major_locator(MultipleLocator(0.5))  # 保持0.5的主刻度
-    axins.yaxis.set_major_locator(MultipleLocator(25))  # 从20改为25，减少刻度数量
-    axins.xaxis.set_minor_locator(MultipleLocator(0.1))  # 保持0.1的次刻度
-    axins.yaxis.set_minor_locator(MultipleLocator(5))   # 保持5的次刻度
-    
-    # 设置子图网格
-    axins.grid(True, linestyle='--', alpha=0.3, zorder=0)
-    
-    # 添加子图标题
-    axins.set_title('Zoomed Region (2.0-5.0 GiB, 0-200ms)', fontsize=14, pad=10)
-    
-    # 设置子图刻度标签格式
-    axins.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
-    axins.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))
-    
-    try:
-        # 添加连接线，指示子图区域，使用更细、更浅的线条
-        mark_inset(ax, axins, loc1=2, loc2=4, fc="none", ec="0.7", lw=1)
-    except:
-        print("Warning: Could not add connecting lines to inset axes")
-    
-    # 保存图表
-    plt.savefig(output_file, dpi=400, bbox_inches='tight')  # 增加DPI
-    print(f"Chart saved to '{output_file}'")
-    plt.close()
-
 if __name__ == "__main__":
     # 设置 matplotlib 使用非交互式后端，避免在无 GUI 环境中出错
     plt.switch_backend('agg')
@@ -1556,44 +794,7 @@ if __name__ == "__main__":
     # pass
     # 绘制模型大小与PPL关系图
     if models_data:
-        plot_model_size_vs_ppl(models_data)
-        
-        # 添加新图表
-        plot_model_size_vs_load_time(models_data)
-        plot_model_size_vs_token_time(models_data)
-    
-    # # 输出分析结果摘要
-    if models_data:
-        print("\n分析结果摘要:")
-        df = pd.DataFrame(models_data)
-        
-        # PPL 最低的模型
-        if 'ppl' in df.columns and not df['ppl'].isna().all():
-            best_ppl_idx = df['ppl'].idxmin()
-            best_ppl_model = df.loc[best_ppl_idx, 'model_name']
-            best_ppl = df.loc[best_ppl_idx, 'ppl']
-            print(f"PPL 最低的模型: {best_ppl_model} (PPL = {best_ppl:.4f})")
-        
-        # 推理速度最快的模型
-        if 'tokens_per_second' in df.columns and not df['tokens_per_second'].isna().all():
-            fastest_idx = df['tokens_per_second'].idxmax()
-            fastest_model = df.loc[fastest_idx, 'model_name']
-            fastest_speed = df.loc[fastest_idx, 'tokens_per_second']
-            print(f"推理速度最快的模型: {fastest_model} ({fastest_speed:.2f} tokens/second)")
-        
-        # 加载时间最短的模型
-        if 'load_time_ms' in df.columns and not df['load_time_ms'].isna().all():
-            fastest_load_idx = df['load_time_ms'].idxmin()
-            fastest_load_model = df.loc[fastest_load_idx, 'model_name']
-            fastest_load = df.loc[fastest_load_idx, 'load_time_ms']
-            print(f"加载时间最短的模型: {fastest_load_model} ({fastest_load:.2f} ms)")
-        
-        # 每个token处理时间最短的模型
-        if 'total_time_ms' in df.columns and 'total_tokens' in df.columns:
-            df['ms_per_token'] = df['total_time_ms'] / df['total_tokens']
-            fastest_token_idx = df['ms_per_token'].idxmin()
-            fastest_token_model = df.loc[fastest_token_idx, 'model_name']
-            fastest_token_time = df.loc[fastest_token_idx, 'ms_per_token']
-            print(f"每个token处理时间最短的模型: {fastest_token_model} ({fastest_token_time:.2f} ms/token)")
+        generate_figure(models_data)
+
     else:
         print("未能从日志文件中提取有效数据，无法生成分析结果")

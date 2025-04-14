@@ -1,9 +1,30 @@
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # 使用Agg后端，避免某些字体渲染问题
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.signal import savgol_filter
 import os
+
+def setup_chinese_font():
+    """设置中文字体支持"""
+    # 按优先级排列可用的中文字体
+    chinese_fonts = [
+        'WenQuanYi Micro Hei',  # 文泉驿微米黑，通常显示效果较好
+        'WenQuanYi Zen Hei',    # 文泉驿正黑
+        'AR PL UMing CN',       # 文鼎 PL 细上海宋
+        'AR PL UKai CN',        # 文鼎 PL 简中楷
+        'Noto Sans CJK JP',     # Noto Sans 日文（也支持中文）
+        'Noto Serif CJK JP'     # Noto Serif 日文（也支持中文）
+    ]
+    
+    # 设置字体
+    plt.rcParams['font.sans-serif'] = chinese_fonts + plt.rcParams['font.sans-serif']
+    plt.rcParams['axes.unicode_minus'] = False
+    
+    print(f"已设置中文字体列表: {', '.join(chinese_fonts)}")
+    return chinese_fonts[0]  # 返回首选字体
 
 def load_active_reasoning_data(csv_path):
     """加载主动推理算法的CSV数据"""
@@ -197,8 +218,8 @@ def calculate_weighted_score(df, smooth=True, window=7):
     if smooth and len(weighted_scores) > window:
         # 使用移动平均平滑数据
         weighted_scores = pd.Series(weighted_scores).rolling(window=window, center=True).mean()
-        # 处理开头和结尾的NaN值
-        weighted_scores = weighted_scores.fillna(method='bfill').fillna(method='ffill')
+        # 处理开头和结尾的NaN值 - 使用推荐的方法
+        weighted_scores = weighted_scores.bfill().ffill()
         
         # 如果数据足够多，可以使用Savitzky-Golay滤波器进一步平滑
         if len(weighted_scores) > window*2:
@@ -215,7 +236,6 @@ def visualize_weighted_score(active_df, random_df, lb_df, output_dir, window=7):
     # 设置绘图风格
     plt.style.use('ggplot')
     sns.set_style("whitegrid")
-    plt.rcParams['font.family'] = 'DejaVu Sans'
     
     # 计算加权得分
     active_weighted = calculate_weighted_score(active_df, smooth=True, window=window)
@@ -229,9 +249,9 @@ def visualize_weighted_score(active_df, random_df, lb_df, output_dir, window=7):
     x = active_df['sequence']
     
     # 绘制主线条，使用不同的线型和更宽的线条
-    ax.plot(x, active_weighted, 'b-', linewidth=3.5, label='Active Reasoning')
-    ax.plot(x, random_weighted, 'r--', linewidth=3.5, label='Random Selection')
-    ax.plot(x, lb_weighted, 'g-.', linewidth=3.5, label='Load Balancing')
+    ax.plot(x, active_weighted, 'b-', linewidth=3.5, label='主动推理')
+    ax.plot(x, random_weighted, 'r--', linewidth=3.5, label='随机选择')
+    ax.plot(x, lb_weighted, 'g-.', linewidth=3.5, label='负载均衡')
     
     # 添加标记点，使用不同的标记样式
     marker_step = max(1, len(x) // 15)
@@ -240,9 +260,9 @@ def visualize_weighted_score(active_df, random_df, lb_df, output_dir, window=7):
     ax.plot(x[::marker_step], lb_weighted[::marker_step], 'g^', markersize=9, alpha=0.8)  # 三角形标记
     
     # 设置图表样式
-    ax.set_title('Weighted Performance Score (Accuracy + Time Efficiency)', fontsize=20, fontweight='bold', pad=20)
-    ax.set_xlabel('Sequence', fontsize=16, labelpad=10)
-    ax.set_ylabel('Weighted Score', fontsize=16, labelpad=10)
+    ax.set_title('加权性能得分 (准确率 + 时间效率)', fontsize=20, fontweight='bold', pad=20)
+    ax.set_xlabel('序列', fontsize=16, labelpad=10)
+    ax.set_ylabel('加权得分', fontsize=16, labelpad=10)
     
     # 增强网格线但降低其存在感
     ax.grid(True, linestyle='--', alpha=0.4, color='lightgray')
@@ -264,13 +284,9 @@ def visualize_weighted_score(active_df, random_df, lb_df, output_dir, window=7):
     # 设置刻度标签大小
     ax.tick_params(axis='both', which='major', labelsize=12)
     
-    # 添加图表注释
-    plt.figtext(0.02, 0.02, 'Note: Higher score indicates better performance', 
-                fontsize=10, style='italic', color='dimgray')
-    
     # 保存图表
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'weighted_score_comparison_enhanced.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, '加权得分对比_增强版.png'), dpi=300, bbox_inches='tight')
     plt.close()
     
     # 方案二：创建分离的视图 (创建第二个版本的图表)
@@ -278,13 +294,13 @@ def visualize_weighted_score(active_df, random_df, lb_df, output_dir, window=7):
     
     # 主图：线条图
     ax1 = axes[0]
-    ax1.plot(x, active_weighted, 'b-', linewidth=3, label='Active Reasoning')
-    ax1.plot(x, random_weighted, 'r-', linewidth=3, label='Random Selection')
-    ax1.plot(x, lb_weighted, 'g-', linewidth=3, label='Load Balancing')
+    ax1.plot(x, active_weighted, 'b-', linewidth=3, label='主动推理')
+    ax1.plot(x, random_weighted, 'r-', linewidth=3, label='随机选择')
+    ax1.plot(x, lb_weighted, 'g-', linewidth=3, label='负载均衡')
     
-    ax1.set_title('Weighted Performance Score Comparison', fontsize=20, fontweight='bold', pad=20)
-    ax1.set_xlabel('Sequence', fontsize=16)
-    ax1.set_ylabel('Weighted Score', fontsize=16)
+    ax1.set_title('加权性能得分对比', fontsize=20, fontweight='bold', pad=20)
+    ax1.set_xlabel('序列', fontsize=16)
+    ax1.set_ylabel('加权得分', fontsize=16)
     ax1.grid(True, linestyle='--', alpha=0.4, color='lightgray')
     ax1.tick_params(axis='both', which='major', labelsize=12)
     
@@ -305,8 +321,8 @@ def visualize_weighted_score(active_df, random_df, lb_df, output_dir, window=7):
     
     # 绘制差异曲线
     ax2.axhline(y=0, color='black', linestyle='-', alpha=0.3)  # 零线
-    ax2.plot(x, diff_random, 'r-', linewidth=2, label='vs Random')
-    ax2.plot(x, diff_lb, 'g-', linewidth=2, label='vs Load Balancing')
+    ax2.plot(x, diff_random, 'r-', linewidth=2, label='与随机选择对比')
+    ax2.plot(x, diff_lb, 'g-', linewidth=2, label='与负载均衡对比')
     
     # 填充正差异区域（主动推理更好）
     ax2.fill_between(x, diff_random, 0, where=(diff_random > 0), color='red', alpha=0.3)
@@ -316,87 +332,26 @@ def visualize_weighted_score(active_df, random_df, lb_df, output_dir, window=7):
     ax2.fill_between(x, diff_random, 0, where=(diff_random <= 0), color='red', alpha=0.15)
     ax2.fill_between(x, diff_lb, 0, where=(diff_lb <= 0), color='green', alpha=0.15)
     
-    ax2.set_xlabel('Sequence', fontsize=14)
-    ax2.set_ylabel('Performance\nDifference', fontsize=14)
+    ax2.set_xlabel('序列', fontsize=14)
+    ax2.set_ylabel('性能差异', fontsize=14)
     ax2.legend(fontsize=12, loc='best')
     ax2.grid(True, linestyle='--', alpha=0.3)
     ax2.set_facecolor('#f8f8f8')
     
     # 添加注释说明差异图的含义
-    plt.figtext(0.02, 0.01, 'Note: Positive values indicate Active Reasoning performs better', 
+    plt.figtext(0.02, 0.01, '正值表示主动推理方法更好', 
                 fontsize=10, style='italic', color='dimgray')
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'weighted_score_with_difference.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, '加权得分与差异图.png'), dpi=300, bbox_inches='tight')
     plt.close()
     
-    # 方案三：使用交互式可视化（保存为HTML文件，如果环境支持）
-    try:
-        import plotly.graph_objects as go
-        from plotly.subplots import make_subplots
-        
-        # 创建交互式图表
-        fig = make_subplots(specs=[[{"secondary_y": False}]])
-        
-        # 添加三条线
-        fig.add_trace(
-            go.Scatter(
-                x=x, y=active_weighted,
-                mode='lines+markers',
-                name='Active Reasoning',
-                line=dict(color='blue', width=3),
-                marker=dict(size=8, symbol='circle')
-            )
-        )
-        
-        fig.add_trace(
-            go.Scatter(
-                x=x, y=random_weighted,
-                mode='lines+markers',
-                name='Random Selection',
-                line=dict(color='red', width=3),
-                marker=dict(size=8, symbol='square')
-            )
-        )
-        
-        fig.add_trace(
-            go.Scatter(
-                x=x, y=lb_weighted,
-                mode='lines+markers',
-                name='Load Balancing',
-                line=dict(color='green', width=3),
-                marker=dict(size=8, symbol='triangle-up')
-            )
-        )
-        
-        # 更新布局
-        fig.update_layout(
-            title='Weighted Performance Score Comparison (Interactive)',
-            title_font_size=20,
-            xaxis_title='Sequence',
-            yaxis_title='Weighted Score',
-            legend=dict(
-                x=0.02,
-                y=0.98,
-                bgcolor='rgba(255, 255, 255, 0.8)',
-                bordercolor='lightgray'
-            ),
-            plot_bgcolor='#f8f8f8',
-            hovermode='x unified'
-        )
-        
-        # 保存为HTML文件（可交互）
-        fig.write_html(os.path.join(output_dir, 'weighted_score_interactive.html'))
-        print(f"已生成交互式图表: {os.path.join(output_dir, 'weighted_score_interactive.html')}")
-    except ImportError:
-        print("注意: 未安装plotly库，跳过生成交互式图表")
         
 def visualize_throughput_score(active_df, random_df, lb_df, output_dir, window=7):
     """单独绘制平滑的负载得分对比图"""
     # 设置绘图风格
     plt.style.use('ggplot')
     sns.set_style("whitegrid")
-    plt.rcParams['font.family'] = 'DejaVu Sans'
     
     # 提取负载得分数据
     active_throughput = active_df['avg_throughput_score_per_batch'].values
@@ -410,10 +365,10 @@ def visualize_throughput_score(active_df, random_df, lb_df, output_dir, window=7
         random_throughput = pd.Series(random_throughput).rolling(window=window, center=True).mean()
         lb_throughput = pd.Series(lb_throughput).rolling(window=window, center=True).mean()
         
-        # 处理NaN值
-        active_throughput = active_throughput.fillna(method='bfill').fillna(method='ffill')
-        random_throughput = random_throughput.fillna(method='bfill').fillna(method='ffill')
-        lb_throughput = lb_throughput.fillna(method='bfill').fillna(method='ffill')
+        # 处理NaN值 - 使用推荐的方法
+        active_throughput = active_throughput.bfill().ffill()
+        random_throughput = random_throughput.bfill().ffill()
+        lb_throughput = lb_throughput.bfill().ffill()
         
         # 如果数据点足够多，使用Savitzky-Golay滤波器进一步平滑
         if len(active_throughput) > window*2:
@@ -432,9 +387,9 @@ def visualize_throughput_score(active_df, random_df, lb_df, output_dir, window=7
     x = active_df['sequence']
     
     # 绘制主线条，使用不同的线型和更宽的线条
-    ax.plot(x, active_throughput, 'b-', linewidth=3.5, label='Active Reasoning')
-    ax.plot(x, random_throughput, 'r--', linewidth=3.5, label='Random Selection')
-    ax.plot(x, lb_throughput, 'g-.', linewidth=3.5, label='Load Balancing')
+    ax.plot(x, active_throughput, 'b-', linewidth=3.5, label='主动推理')
+    ax.plot(x, random_throughput, 'r--', linewidth=3.5, label='随机选择')
+    ax.plot(x, lb_throughput, 'g-.', linewidth=3.5, label='负载均衡')
     
     # 添加标记点，使用不同的标记样式，但间隔更大以避免拥挤
     marker_step = max(1, len(x) // 12)
@@ -443,9 +398,9 @@ def visualize_throughput_score(active_df, random_df, lb_df, output_dir, window=7
     ax.plot(x[::marker_step], lb_throughput[::marker_step], 'g^', markersize=9, alpha=0.8)
     
     # 设置图表样式
-    ax.set_title('Throughput Score Comparison', fontsize=20, fontweight='bold', pad=20)
-    ax.set_xlabel('Sequence', fontsize=16, labelpad=10)
-    ax.set_ylabel('Throughput Score', fontsize=16, labelpad=10)
+    ax.set_title('负载得分对比', fontsize=20, fontweight='bold', pad=20)
+    ax.set_xlabel('序列', fontsize=16, labelpad=10)
+    ax.set_ylabel('负载得分', fontsize=16, labelpad=10)
     
     # 增强网格线但降低其存在感
     ax.grid(True, linestyle='--', alpha=0.4, color='lightgray')
@@ -467,13 +422,9 @@ def visualize_throughput_score(active_df, random_df, lb_df, output_dir, window=7
     # 设置刻度标签大小
     ax.tick_params(axis='both', which='major', labelsize=12)
     
-    # 添加图表注释
-    plt.figtext(0.02, 0.02, 'Note: Higher score indicates better resource utilization', 
-                fontsize=10, style='italic', color='dimgray')
-    
     # 保存图表
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'throughput_score_comparison_smooth.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, '负载得分对比_平滑版.png'), dpi=300, bbox_inches='tight')
     plt.close()
     
     # 创建第二个版本：带有性能差异的分离视图
@@ -481,13 +432,13 @@ def visualize_throughput_score(active_df, random_df, lb_df, output_dir, window=7
     
     # 主图：线条图
     ax1 = axes[0]
-    ax1.plot(x, active_throughput, 'b-', linewidth=3, label='Active Reasoning')
-    ax1.plot(x, random_throughput, 'r-', linewidth=3, label='Random Selection')
-    ax1.plot(x, lb_throughput, 'g-', linewidth=3, label='Load Balancing')
+    ax1.plot(x, active_throughput, 'b-', linewidth=3, label='主动推理')
+    ax1.plot(x, random_throughput, 'r-', linewidth=3, label='随机选择')
+    ax1.plot(x, lb_throughput, 'g-', linewidth=3, label='负载均衡')
     
-    ax1.set_title('Throughput Score Comparison', fontsize=20, fontweight='bold', pad=20)
-    ax1.set_xlabel('Sequence', fontsize=16)
-    ax1.set_ylabel('Throughput Score', fontsize=16)
+    ax1.set_title('负载得分对比', fontsize=20, fontweight='bold', pad=20)
+    ax1.set_xlabel('序列', fontsize=16)
+    ax1.set_ylabel('负载得分', fontsize=16)
     ax1.grid(True, linestyle='--', alpha=0.4, color='lightgray')
     ax1.tick_params(axis='both', which='major', labelsize=12)
     
@@ -508,8 +459,8 @@ def visualize_throughput_score(active_df, random_df, lb_df, output_dir, window=7
     
     # 绘制差异曲线
     ax2.axhline(y=0, color='black', linestyle='-', alpha=0.3)  # 零线
-    ax2.plot(x, diff_random, 'r-', linewidth=2, label='vs Random')
-    ax2.plot(x, diff_lb, 'g-', linewidth=2, label='vs Load Balancing')
+    ax2.plot(x, diff_random, 'r-', linewidth=2, label='与随机选择对比')
+    ax2.plot(x, diff_lb, 'g-', linewidth=2, label='与负载均衡对比')
     
     # 填充正差异区域（主动推理更好）
     ax2.fill_between(x, diff_random, 0, where=(diff_random > 0), color='red', alpha=0.3)
@@ -519,18 +470,18 @@ def visualize_throughput_score(active_df, random_df, lb_df, output_dir, window=7
     ax2.fill_between(x, diff_random, 0, where=(diff_random <= 0), color='red', alpha=0.15)
     ax2.fill_between(x, diff_lb, 0, where=(diff_lb <= 0), color='green', alpha=0.15)
     
-    ax2.set_xlabel('Sequence', fontsize=14)
-    ax2.set_ylabel('Throughput\nDifference', fontsize=14)
+    ax2.set_xlabel('序列', fontsize=14)
+    ax2.set_ylabel('负载差异', fontsize=14)
     ax2.legend(fontsize=12, loc='best')
     ax2.grid(True, linestyle='--', alpha=0.3)
     ax2.set_facecolor('#f8f8f8')
     
     # 添加注释说明差异图的含义
-    plt.figtext(0.02, 0.01, 'Note: Positive values indicate Active Reasoning performs better', 
+    plt.figtext(0.02, 0.01, '正值表示主动推理方法更好', 
                 fontsize=10, style='italic', color='dimgray')
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'throughput_score_with_difference.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, '负载得分与差异图.png'), dpi=300, bbox_inches='tight')
     plt.close()
         
 def visualize_comparison(active_df, random_df, lb_df, output_dir):
@@ -538,60 +489,59 @@ def visualize_comparison(active_df, random_df, lb_df, output_dir):
     # 设置绘图风格
     plt.style.use('ggplot')
     sns.set(style="whitegrid")
-    plt.rcParams['font.family'] = 'DejaVu Sans'
-    
+        
     # 1. 原始对比图
     plt.figure(figsize=(18, 12))
     
     # 准确率比较
     plt.subplot(3, 1, 1)
-    plt.plot(active_df['sequence'], active_df['average_batch_accuracy_score_per_batch'], 'b-', linewidth=2, label='Active Reasoning')
-    plt.plot(random_df['sequence'], random_df['average_batch_accuracy_score_per_batch'], 'r-', linewidth=2, label='Random Selection')
-    plt.plot(lb_df['sequence'], lb_df['average_batch_accuracy_score_per_batch'], 'g-', linewidth=2, label='Load Balancing')
-    plt.title('Accuracy Score Comparison', fontsize=16, fontweight='bold')
-    plt.xlabel('Sequence', fontsize=12)
-    plt.ylabel('Accuracy Score', fontsize=12)
+    plt.plot(active_df['sequence'], active_df['average_batch_accuracy_score_per_batch'], 'b-', linewidth=2, label='主动推理')
+    plt.plot(random_df['sequence'], random_df['average_batch_accuracy_score_per_batch'], 'r-', linewidth=2, label='随机选择')
+    plt.plot(lb_df['sequence'], lb_df['average_batch_accuracy_score_per_batch'], 'g-', linewidth=2, label='负载均衡')
+    plt.title('准确率得分对比', fontsize=16, fontweight='bold')
+    plt.xlabel('序列', fontsize=12)
+    plt.ylabel('准确率得分', fontsize=12)
     plt.legend(fontsize=12)
     plt.grid(True, alpha=0.3)
     
     # 时延比较
     plt.subplot(3, 1, 2)
-    plt.plot(active_df['sequence'], active_df['single_batch_time_consumption'], 'b-', linewidth=2, label='Active Reasoning')
-    plt.plot(random_df['sequence'], random_df['single_batch_time_consumption'], 'r-', linewidth=2, label='Random Selection')
-    plt.plot(lb_df['sequence'], lb_df['single_batch_time_consumption'], 'g-', linewidth=2, label='Load Balancing')
-    plt.title('Time Consumption Comparison', fontsize=16, fontweight='bold')
-    plt.xlabel('Sequence', fontsize=12)
-    plt.ylabel('Time (s)', fontsize=12)
+    plt.plot(active_df['sequence'], active_df['single_batch_time_consumption'], 'b-', linewidth=2, label='主动推理')
+    plt.plot(random_df['sequence'], random_df['single_batch_time_consumption'], 'r-', linewidth=2, label='随机选择')
+    plt.plot(lb_df['sequence'], lb_df['single_batch_time_consumption'], 'g-', linewidth=2, label='负载均衡')
+    plt.title('时间消耗对比', fontsize=16, fontweight='bold')
+    plt.xlabel('序列', fontsize=12)
+    plt.ylabel('时间 (秒)', fontsize=12)
     plt.legend(fontsize=12)
     plt.grid(True, alpha=0.3)
     
     # 负载得分比较
     plt.subplot(3, 1, 3)
-    plt.plot(active_df['sequence'], active_df['avg_throughput_score_per_batch'], 'b-', linewidth=2, label='Active Reasoning')
-    plt.plot(random_df['sequence'], random_df['avg_throughput_score_per_batch'], 'r-', linewidth=2, label='Random Selection')
-    plt.plot(lb_df['sequence'], lb_df['avg_throughput_score_per_batch'], 'g-', linewidth=2, label='Load Balancing')
-    plt.title('Throughput Score Comparison', fontsize=16, fontweight='bold')
-    plt.xlabel('Sequence', fontsize=12)
-    plt.ylabel('Throughput Score', fontsize=12)
+    plt.plot(active_df['sequence'], active_df['avg_throughput_score_per_batch'], 'b-', linewidth=2, label='主动推理')
+    plt.plot(random_df['sequence'], random_df['avg_throughput_score_per_batch'], 'r-', linewidth=2, label='随机选择')
+    plt.plot(lb_df['sequence'], lb_df['avg_throughput_score_per_batch'], 'g-', linewidth=2, label='负载均衡')
+    plt.title('负载得分对比', fontsize=16, fontweight='bold')
+    plt.xlabel('序列', fontsize=12)
+    plt.ylabel('负载得分', fontsize=12)
     plt.legend(fontsize=12)
     plt.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'algorithm_comparison.png'), dpi=300)
+    plt.savefig(os.path.join(output_dir, '算法对比.png'), dpi=300)
     plt.close()
     
     # 2. 单独的负载得分对比图
     plt.figure(figsize=(12, 8))
-    plt.plot(active_df['sequence'], active_df['avg_throughput_score_per_batch'], 'b-', linewidth=2.5, label='Active Reasoning')
-    plt.plot(random_df['sequence'], random_df['avg_throughput_score_per_batch'], 'r-', linewidth=2.5, label='Random Selection')
-    plt.plot(lb_df['sequence'], lb_df['avg_throughput_score_per_batch'], 'g-', linewidth=2.5, label='Load Balancing')
-    plt.title('Throughput Score Comparison', fontsize=18, fontweight='bold')
-    plt.xlabel('Sequence', fontsize=14)
-    plt.ylabel('Throughput Score', fontsize=14)
+    plt.plot(active_df['sequence'], active_df['avg_throughput_score_per_batch'], 'b-', linewidth=2.5, label='主动推理')
+    plt.plot(random_df['sequence'], random_df['avg_throughput_score_per_batch'], 'r-', linewidth=2.5, label='随机选择')
+    plt.plot(lb_df['sequence'], lb_df['avg_throughput_score_per_batch'], 'g-', linewidth=2.5, label='负载均衡')
+    plt.title('负载得分对比', fontsize=18, fontweight='bold')
+    plt.xlabel('序列', fontsize=14)
+    plt.ylabel('负载得分', fontsize=14)
     plt.legend(fontsize=14)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'throughput_score_comparison.png'), dpi=300)
+    plt.savefig(os.path.join(output_dir, '负载得分对比.png'), dpi=300)
     plt.close()
     
     # 3. 加权综合得分对比图
@@ -600,16 +550,16 @@ def visualize_comparison(active_df, random_df, lb_df, output_dir):
     lb_weighted = calculate_weighted_score(lb_df)
     
     plt.figure(figsize=(12, 8))
-    plt.plot(active_df['sequence'], active_weighted, 'b-', linewidth=2.5, label='Active Reasoning')
-    plt.plot(random_df['sequence'], random_weighted, 'r-', linewidth=2.5, label='Random Selection')
-    plt.plot(lb_df['sequence'], lb_weighted, 'g-', linewidth=2.5, label='Load Balancing')
-    plt.title('Weighted Score Comparison (Accuracy + Normalized Time)', fontsize=18, fontweight='bold')
-    plt.xlabel('Sequence', fontsize=14)
-    plt.ylabel('Weighted Score', fontsize=14)
+    plt.plot(active_df['sequence'], active_weighted, 'b-', linewidth=2.5, label='主动推理')
+    plt.plot(random_df['sequence'], random_weighted, 'r-', linewidth=2.5, label='随机选择')
+    plt.plot(lb_df['sequence'], lb_weighted, 'g-', linewidth=2.5, label='负载均衡')
+    plt.title('加权得分对比 (准确率 + 规范化时间)', fontsize=18, fontweight='bold')
+    plt.xlabel('序列', fontsize=14)
+    plt.ylabel('加权得分', fontsize=14)
     plt.legend(fontsize=14)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'weighted_score_comparison.png'), dpi=300)
+    plt.savefig(os.path.join(output_dir, '加权得分对比.png'), dpi=300)
     plt.close()
     
     # 4. 绘制累计性能图
@@ -617,39 +567,156 @@ def visualize_comparison(active_df, random_df, lb_df, output_dir):
     
     # 累计准确率
     plt.subplot(3, 1, 1)
-    plt.plot(active_df['sequence'], active_df['client_sum_batch_accuravy_score'], 'b-', linewidth=2, label='Active Reasoning')
-    plt.plot(random_df['sequence'], random_df['client_sum_batch_accuravy_score'], 'r-', linewidth=2, label='Random Selection')
-    plt.plot(lb_df['sequence'], lb_df['client_sum_batch_accuravy_score'], 'g-', linewidth=2, label='Load Balancing')
-    plt.title('Cumulative Accuracy Score', fontsize=16, fontweight='bold')
-    plt.xlabel('Sequence', fontsize=12)
-    plt.ylabel('Cumulative Accuracy', fontsize=12)
+    plt.plot(active_df['sequence'], active_df['client_sum_batch_accuravy_score'], 'b-', linewidth=2, label='主动推理')
+    plt.plot(random_df['sequence'], random_df['client_sum_batch_accuravy_score'], 'r-', linewidth=2, label='随机选择')
+    plt.plot(lb_df['sequence'], lb_df['client_sum_batch_accuravy_score'], 'g-', linewidth=2, label='负载均衡')
+    plt.title('累计准确率得分', fontsize=16, fontweight='bold')
+    plt.xlabel('序列', fontsize=12)
+    plt.ylabel('累计准确率', fontsize=12)
     plt.legend(fontsize=12)
     plt.grid(True, alpha=0.3)
     
     # 累计时延
     plt.subplot(3, 1, 2)
-    plt.plot(active_df['sequence'], active_df['client_sum_batch_time_consumption'], 'b-', linewidth=2, label='Active Reasoning')
-    plt.plot(random_df['sequence'], random_df['client_sum_batch_time_consumption'], 'r-', linewidth=2, label='Random Selection')
-    plt.plot(lb_df['sequence'], lb_df['client_sum_batch_time_consumption'], 'g-', linewidth=2, label='Load Balancing')
-    plt.title('Cumulative Time Consumption', fontsize=16, fontweight='bold')
-    plt.xlabel('Sequence', fontsize=12)
-    plt.ylabel('Cumulative Time (s)', fontsize=12)
+    plt.plot(active_df['sequence'], active_df['client_sum_batch_time_consumption'], 'b-', linewidth=2, label='主动推理')
+    plt.plot(random_df['sequence'], random_df['client_sum_batch_time_consumption'], 'r-', linewidth=2, label='随机选择')
+    plt.plot(lb_df['sequence'], lb_df['client_sum_batch_time_consumption'], 'g-', linewidth=2, label='负载均衡')
+    plt.title('累计时间消耗', fontsize=16, fontweight='bold')
+    plt.xlabel('序列', fontsize=12)
+    plt.ylabel('累计时间 (秒)', fontsize=12)
     plt.legend(fontsize=12)
     plt.grid(True, alpha=0.3)
     
     # 累计负载得分
     plt.subplot(3, 1, 3)
-    plt.plot(active_df['sequence'], active_df['client_sum_batch_throughput_score'], 'b-', linewidth=2, label='Active Reasoning')
-    plt.plot(random_df['sequence'], random_df['client_sum_batch_throughput_score'], 'r-', linewidth=2, label='Random Selection')
-    plt.plot(lb_df['sequence'], lb_df['client_sum_batch_throughput_score'], 'g-', linewidth=2, label='Load Balancing')
-    plt.title('Cumulative Throughput Score', fontsize=16, fontweight='bold')
-    plt.xlabel('Sequence', fontsize=12)
-    plt.ylabel('Cumulative Throughput', fontsize=12)
+    plt.plot(active_df['sequence'], active_df['client_sum_batch_throughput_score'], 'b-', linewidth=2, label='主动推理')
+    plt.plot(random_df['sequence'], random_df['client_sum_batch_throughput_score'], 'r-', linewidth=2, label='随机选择')
+    plt.plot(lb_df['sequence'], lb_df['client_sum_batch_throughput_score'], 'g-', linewidth=2, label='负载均衡')
+    plt.title('累计负载得分', fontsize=16, fontweight='bold')
+    plt.xlabel('序列', fontsize=12)
+    plt.ylabel('累计负载', fontsize=12)
     plt.legend(fontsize=12)
     plt.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'cumulative_comparison.png'), dpi=300)
+    plt.savefig(os.path.join(output_dir, '累计性能对比.png'), dpi=300)
+    plt.close()
+
+def create_boxplots(active_df, random_df, lb_df, output_dir):
+    """创建箱型图分析不同算法的性能分布"""
+    # 设置绘图风格
+    plt.style.use('ggplot')
+    sns.set_style("whitegrid")
+    
+    # 准备数据
+    # 添加算法标识列
+    active_df_copy = active_df.copy()
+    random_df_copy = random_df.copy()
+    lb_df_copy = lb_df.copy()
+    
+    active_df_copy['算法'] = '主动推理'
+    random_df_copy['算法'] = '随机选择'
+    lb_df_copy['算法'] = '负载均衡'
+    
+    # 合并数据
+    combined_df = pd.concat([active_df_copy, random_df_copy, lb_df_copy])
+    
+    # 创建箱型图
+    plt.figure(figsize=(15, 10))
+    
+    # 1. 准确率箱型图
+    plt.subplot(3, 1, 1)
+    sns.boxplot(x='算法', y='average_batch_accuracy_score_per_batch', data=combined_df, palette={'主动推理': 'blue', '随机选择': 'red', '负载均衡': 'green'})
+    plt.title('各算法准确率分布', fontsize=16, fontweight='bold')
+    plt.xlabel('算法', fontsize=14)
+    plt.ylabel('准确率得分', fontsize=14)
+    plt.grid(True, linestyle='--', alpha=0.3)
+    
+    # 添加均值点和数值标注
+    for i, algorithm in enumerate(['主动推理', '随机选择', '负载均衡']):
+        mean_val = combined_df[combined_df['算法'] == algorithm]['average_batch_accuracy_score_per_batch'].mean()
+        plt.scatter(i, mean_val, color='black', s=50, zorder=3)
+        plt.text(i, mean_val, f'均值: {mean_val:.3f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+    
+    # 2. 时延箱型图
+    plt.subplot(3, 1, 2)
+    sns.boxplot(x='算法', y='single_batch_time_consumption', data=combined_df, palette={'主动推理': 'blue', '随机选择': 'red', '负载均衡': 'green'})
+    plt.title('各算法时延分布', fontsize=16, fontweight='bold')
+    plt.xlabel('算法', fontsize=14)
+    plt.ylabel('时延 (秒)', fontsize=14)
+    plt.grid(True, linestyle='--', alpha=0.3)
+    
+    # 添加均值点和数值标注
+    for i, algorithm in enumerate(['主动推理', '随机选择', '负载均衡']):
+        mean_val = combined_df[combined_df['算法'] == algorithm]['single_batch_time_consumption'].mean()
+        plt.scatter(i, mean_val, color='black', s=50, zorder=3)
+        plt.text(i, mean_val, f'均值: {mean_val:.3f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+    
+    # 3. 负载得分箱型图
+    plt.subplot(3, 1, 3)
+    sns.boxplot(x='算法', y='avg_throughput_score_per_batch', data=combined_df, palette={'主动推理': 'blue', '随机选择': 'red', '负载均衡': 'green'})
+    plt.title('各算法负载得分分布', fontsize=16, fontweight='bold')
+    plt.xlabel('算法', fontsize=14)
+    plt.ylabel('负载得分', fontsize=14)
+    plt.grid(True, linestyle='--', alpha=0.3)
+    
+    # 添加均值点和数值标注
+    for i, algorithm in enumerate(['主动推理', '随机选择', '负载均衡']):
+        mean_val = combined_df[combined_df['算法'] == algorithm]['avg_throughput_score_per_batch'].mean()
+        plt.scatter(i, mean_val, color='black', s=50, zorder=3)
+        plt.text(i, mean_val, f'均值: {mean_val:.3f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, '算法性能箱型图.png'), dpi=300)
+    plt.close()
+    
+    # 创建加权得分的箱型图
+    plt.figure(figsize=(10, 6))
+    
+    # 计算加权得分
+    active_weighted = calculate_weighted_score(active_df, smooth=False)
+    random_weighted = calculate_weighted_score(random_df, smooth=False)
+    lb_weighted = calculate_weighted_score(lb_df, smooth=False)
+    
+    # 创建临时DataFrame
+    weighted_data = pd.DataFrame({
+        '算法': ['主动推理'] * len(active_weighted) + ['随机选择'] * len(random_weighted) + ['负载均衡'] * len(lb_weighted),
+        '加权得分': list(active_weighted) + list(random_weighted) + list(lb_weighted)
+    })
+    
+    # 绘制箱型图
+    sns.boxplot(x='算法', y='加权得分', data=weighted_data, palette={'主动推理': 'blue', '随机选择': 'red', '负载均衡': 'green'})
+    plt.title('各算法加权性能得分分布', fontsize=16, fontweight='bold')
+    plt.xlabel('算法', fontsize=14)
+    plt.ylabel('加权得分', fontsize=14)
+    plt.grid(True, linestyle='--', alpha=0.3)
+    
+    # 添加均值点和数值标注
+    for i, algorithm in enumerate(['主动推理', '随机选择', '负载均衡']):
+        mean_val = weighted_data[weighted_data['算法'] == algorithm]['加权得分'].mean()
+        plt.scatter(i, mean_val, color='black', s=50, zorder=3)
+        plt.text(i, mean_val, f'均值: {mean_val:.2f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, '加权得分箱型图.png'), dpi=300)
+    plt.close()
+    
+    # 添加小提琴图以显示分布密度
+    plt.figure(figsize=(10, 6))
+    sns.violinplot(x='算法', y='加权得分', data=weighted_data, palette={'主动推理': 'blue', '随机选择': 'red', '负载均衡': 'green'}, inner='box')
+    plt.title('各算法加权性能得分分布 (小提琴图)', fontsize=16, fontweight='bold')
+    plt.xlabel('算法', fontsize=14)
+    plt.ylabel('加权得分', fontsize=14)
+    plt.grid(True, linestyle='--', alpha=0.3)
+    
+    # 添加均值点和数值标注
+    for i, algorithm in enumerate(['主动推理', '随机选择', '负载均衡']):
+        mean_val = weighted_data[weighted_data['算法'] == algorithm]['加权得分'].mean()
+        plt.scatter(i, mean_val, color='black', s=50, zorder=3)
+        plt.text(i, mean_val, f'均值: {mean_val:.2f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, '加权得分小提琴图.png'), dpi=300)
     plt.close()
 
 def save_results(random_df, lb_df, active_df, output_dir):
@@ -686,9 +753,12 @@ def smooth_data(df, columns, window_length=11, polyorder=3):
     return smoothed_df
 
 if __name__ == "__main__":
+    # 设置中文字体
+    setup_chinese_font()
+    
     # 获取输入和输出路径
     csv_path = "/home/wu/workspace/LLM_Distribution_Center/metrics/3_17/92_client_metrics.csv"
-    output_dir = "/home/wu/workspace/LLM_Distribution_Center/metrics/3_17/92"
+    output_dir = "/home/wu/workspace/LLM_Distribution_Center/metrics/3_24_cn/92"
     
     # 确保输出目录存在
     if not os.path.exists(output_dir):
@@ -719,12 +789,16 @@ if __name__ == "__main__":
     
     # 可视化比较
     visualize_comparison(df, random_df, lb_df, output_dir)
+    
     # 添加增强的加权得分可视化
     window_size = min(7, len(df)//3) if len(df) > 10 else 3
     visualize_weighted_score(df, random_df, lb_df, output_dir, window=window_size)
     
     # 添加平滑的负载得分可视化
     visualize_throughput_score(df, random_df, lb_df, output_dir, window=window_size)
+    
+    # 添加箱型图分析
+    create_boxplots(df, random_df, lb_df, output_dir)
     
     # 保存结果
     save_results(random_df, lb_df, df, output_dir)
@@ -734,7 +808,10 @@ if __name__ == "__main__":
     print(f"已保存负载均衡方法数据到: {os.path.join(output_dir, 'load_balancing_data.csv')}")
     print(f"已保存合并数据到: {os.path.join(output_dir, 'combined_algorithm_data.csv')}")
     print(f"已生成对比可视化图表:")
-    print(f"  - {os.path.join(output_dir, 'algorithm_comparison.png')}")
-    print(f"  - {os.path.join(output_dir, 'cumulative_comparison.png')}")
-    print(f"  - {os.path.join(output_dir, 'throughput_score_comparison.png')}")
-    print(f"  - {os.path.join(output_dir, 'weighted_score_comparison.png')}")
+    print(f"  - {os.path.join(output_dir, '算法对比.png')}")
+    print(f"  - {os.path.join(output_dir, '累计性能对比.png')}")
+    print(f"  - {os.path.join(output_dir, '负载得分对比.png')}")
+    print(f"  - {os.path.join(output_dir, '加权得分对比.png')}")
+    print(f"  - {os.path.join(output_dir, '算法性能箱型图.png')}")
+    print(f"  - {os.path.join(output_dir, '加权得分箱型图.png')}")
+    print(f"  - {os.path.join(output_dir, '加权得分小提琴图.png')}")

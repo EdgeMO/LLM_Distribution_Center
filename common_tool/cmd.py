@@ -3,6 +3,8 @@ import psutil
 import threading
 import time
 import statistics
+import socket
+import struct
 class ResourceMonitor:
     def __init__(self):
         self.monitoring = False
@@ -58,42 +60,77 @@ class CMD:
     def __init__(self):
         
         pass
-    def run_task_process_cmd(self,llama_cli_path,model_path, query_prefix = 'please translate the sentence in english',query_word="我是谁?"):
-        """ for edge node to run task process command
-
-        Args:
-            query_prefix (_type_): specific prefix for query
-            query_word (_type_): actual query word
-            llama_cli_path (_type_): path to llama-cli
-            model_path (_type_): path to model
-        """
+    def run_task_process_cmd(self, llama_cli_path, model_path, query_prefix='please translate the sentence in english', query_word="我是谁?"):
         command = [
             llama_cli_path,
             "-m", model_path,
             "-p", f"{query_prefix} {query_word}",
-            "-n","128"
+            "-n", "128"
         ]
         monitor = ResourceMonitor()
         
+        # Create a socket connection to the visualizer
+        try:
+            vis_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            vis_socket.connect(("localhost", 12346))  # Visualizer should listen on this port
+        except Exception as e:
+            print(f"Failed to connect to visualizer: {e}")
+            vis_socket = None
+        
         try:
             monitor.start_monitoring()
-            result = subprocess.run(command, capture_output=True, text=True, check=True)
-            print(result.stdout)
+            
+            # Use Popen instead of run to capture output in real-time
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+            
+            # Collect all output for the return value
+            full_output = ""
+            
+            # Read output line by line
+            for line in iter(process.stdout.readline, ''):
+                print(line, end='')  # Print to console
+                full_output += line
+                
+                # Send to visualizer if connected
+                if vis_socket:
+                    try:
+                        # Send the line with a length prefix
+                        message_bytes = line.encode('utf-8')
+                        vis_socket.sendall(struct.pack('>I', len(message_bytes)))
+                        vis_socket.sendall(message_bytes)
+                    except Exception as e:
+                        print(f"Failed to send output to visualizer: {e}")
+                        vis_socket = None
+            
+            # Wait for process to complete
+            process.wait()
             monitor.stop_monitoring()
             resource_stats = monitor.get_resource_stats()
-            temp_res = result.stdout
-            res = self.extract_after_start(temp_res)
-            return res,resource_stats
-        except subprocess.CalledProcessError as e:
-            # 停止监控
-            monitor.stop_monitoring()
-            print(f"命令执行失败: {e}")
-            return '', monitor.get_resource_stats()
-        
+            
+            # Close the visualizer socket
+            if vis_socket:
+                vis_socket.close()
+            
+            # Extract the actual result
+            res = self.extract_after_start(full_output)
+            return res, resource_stats
+            
         except Exception as e:
-            # 停止监控
+            # Stop monitoring
             monitor.stop_monitoring()
-            print(f"发生错误: {e}")
+            print(f"Error occurred: {e}")
+            
+            # Close the visualizer socket
+            if vis_socket:
+                vis_socket.close()
+                
             return '', monitor.get_resource_stats()
 
     def extract_after_start(self, text):
