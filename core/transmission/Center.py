@@ -180,8 +180,9 @@ class EdgeCommunicator:
 
         print(f"File {file_name} sent successfully to client {client_index}")
 
-    def process_task_message_transmission(self, client_socket, message):
+    def process_task_message_transmission(self, index, client_socket, message):
         # send meta data
+        client_index = index
         task_message = self.generate_meta_data(DistributionType.TASK, task_message=message)
 
         # Serialize the message
@@ -218,7 +219,7 @@ class EdgeCommunicator:
                 elif mode == DistributionType.TASK.value:
                     # task_transmission
                     print(f"Sent TASK message to client {index}")
-                    self.process_task_message_transmission(client_socket, message)
+                    self.process_task_message_transmission(index, client_socket, message)
             except Exception as e:
                 print(f"Error sending message to client {index}: {e}")
                 break
@@ -265,6 +266,6 @@ if __name__ == "__main__":
     message_list = {'edge_id': '0', 'task_set': [{'task_id': 682, 'task_type': 1, 'task_token': 'Please identify the named entities in the following text. Classify entities into categories such as Person, Location, Organization, Miscellaneous \n\n Text:Widodo', 'reference_value': 'PER'}, {'task_id': 583, 'task_type': 1, 'task_token': 'Please identify the named entities in the following text. Classify entities into categories such as Person, Location, Organization, Miscellaneous \n\n Text:,', 'reference_value': 'MISC'}], 'mode': 0, 'sequence': 0, 'timestamp': 1739867172.290468}
     model_message = {
         "mode": 1,
-        "file_path": "/home/wu/workspace/qwen2.5-7b-instruct-q4_0.gguf"
+        "file_path": "model/models/qwen2.5-7b-instruct-q4_k_m.gguf"
     }
     communicator.send_task_message_to_client(0, model_message)

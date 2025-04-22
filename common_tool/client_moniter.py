@@ -1,302 +1,233 @@
 import os
 import time
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import tkinter as tk
-from tkinter import ttk, scrolledtext
-import threading
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 import ast
-import numpy as np
+import json
+import threading
 import queue
 import socket
 import struct
-import json
+from flask import Flask, render_template_string, jsonify, Response, send_file
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+import matplotlib
+matplotlib.use('Agg')  # 使用非交互式后端，无需显示器
+import matplotlib.pyplot as plt
+import io
+import base64
 
-class MetricsVisualizer:
-    def __init__(self, csv_file_path='metrics/client/client_metrics.csv'):
+class WebMetricsVisualizer:
+    def __init__(self, csv_file_path='metrics/client/client_metrics.csv', port=12347):
         """
-        Initialize metrics visualizer
+        Initialize web-based metrics visualizer
         
         Args:
             csv_file_path: Path to the CSV file
+            port: Web server port
         """
         self.csv_file_path = csv_file_path
+        self.port = port
         self.data = None
         self.last_modified_time = 0
-        
-        # Create a queue for command output
         self.output_queue = queue.Queue()
+        self.auto_refresh = True
         
-        # Create main window
-        self.root = tk.Tk()
-        self.root.title("Client Metrics Visualization")
-        self.root.geometry("1600x1000")  # Larger window to fit all components
-        self.root.configure(bg='white')
+        # 创建 Flask 应用
+        self.app = Flask(__name__)
         
-        # Create main frame
-        main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # 设置路由
+        self.setup_routes()
         
-        # Create top frame for controls and stats
-        top_frame = ttk.Frame(main_frame)
-        top_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        # Create control panel in top frame
-        self.create_control_panel(top_frame)
-        
-        # Create data display area
-        self.create_data_display(main_frame)
-        
-        # Create bottom frame that will be split into left and right
-        bottom_frame = ttk.Frame(main_frame)
-        bottom_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Left frame for charts
-        chart_frame = ttk.Frame(bottom_frame)
-        chart_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # Right frame for console output
-        console_frame = ttk.LabelFrame(bottom_frame, text="Command Output")
-        console_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=False, padx=5)
-        console_frame.config(width=500)
-        
-        # Create console output text widget
-        self.create_console_output(console_frame)
-        
-        # Create chart area
-        self.create_chart_area(chart_frame)
-        
-        # Set up file monitoring
+        # 设置文件监控
         self.setup_file_monitoring()
         
-        # Set up socket for command output
+        # 设置命令输出接收器
         self.setup_command_output_receiver()
         
-        # Initial data load
+        # 初始加载数据
         self.load_data()
-        self.update_chart()
-        self.update_data_tree()
-        
-        # Start periodic updates of the console
-        self.update_console_output()
 
-    def create_control_panel(self, parent):
-        """Create control panel"""
-        control_frame = ttk.Frame(parent)
-        control_frame.pack(side=tk.TOP, fill=tk.X)
+    def setup_routes(self):
+        """设置 Flask 路由"""
+        @self.app.route('/')
+        def index():
+            return render_template_string(self.get_html_template())
         
-        # Title label
-        title_label = ttk.Label(control_frame, text="Sequence:", font=("Arial", 12, "bold"))
-        title_label.pack(side=tk.LEFT, padx=5)
+        @self.app.route('/data')
+        def get_data():
+            """获取当前数据的 API 端点"""
+            if self.data is None or self.data.empty:
+                return jsonify({'data': None, 'stats': {}, 'sequence': 0})
+            
+            # 转换数据为 JSON 格式
+            data_json = self.data.tail(20).to_dict(orient='records')
+            
+            # 计算统计数据
+            stats = self.calculate_stats()
+            
+            return jsonify({
+                'data': data_json,
+                'stats': stats,
+                'sequence': int(self.data['sequence'].iloc[-1]) if not self.data.empty else 0
+            })
         
-        self.sequence_label = ttk.Label(control_frame, text="N/A", font=("Arial", 12))
-        self.sequence_label.pack(side=tk.LEFT, padx=5)
+        @self.app.route('/charts')
+        def get_charts():
+            """获取图表的 API 端点"""
+            if self.data is None or self.data.empty:
+                return jsonify({'error': 'No data available'})
+            
+            # 生成所有图表
+            chart_images = self.generate_chart_images()
+            
+            return jsonify(chart_images)
         
-        # Refresh button
-        refresh_btn = ttk.Button(control_frame, text="Refresh Data", command=self.load_data_and_update)
-        refresh_btn.pack(side=tk.LEFT, padx=20)
+        @self.app.route('/console_stream')
+        def console_stream():
+            """使用服务器发送事件流式传输控制台输出"""
+            def generate():
+                while True:
+                    try:
+                        # 从队列获取输出，设置超时
+                        output = self.output_queue.get(timeout=1)
+                        yield f"data: {json.dumps({'text': output})}\n\n"
+                    except queue.Empty:
+                        # 发送心跳以保持连接
+                        yield f"data: {json.dumps({'heartbeat': True})}\n\n"
+                    time.sleep(0.1)
+            
+            return Response(generate(), mimetype='text/event-stream')
         
-        # Auto refresh option
-        self.auto_refresh_var = tk.BooleanVar(value=True)
-        auto_refresh_check = ttk.Checkbutton(
-            control_frame, 
-            text="Auto Refresh", 
-            variable=self.auto_refresh_var
-        )
-        auto_refresh_check.pack(side=tk.LEFT, padx=5)
+        @self.app.route('/toggle_refresh')
+        def toggle_refresh():
+            """切换自动刷新设置"""
+            self.auto_refresh = not self.auto_refresh
+            return jsonify({'auto_refresh': self.auto_refresh})
         
-        # Display statistics
-        self.stats_label = ttk.Label(control_frame, text="")
-        self.stats_label.pack(side=tk.RIGHT, padx=5)
+        @self.app.route('/export_data')
+        def export_data():
+            """导出数据为 CSV 文件"""
+            if self.data is None or self.data.empty:
+                return jsonify({'error': 'No data available'})
+            
+            # 创建临时文件
+            temp_file = f'metrics_export_{time.strftime("%Y%m%d_%H%M%S")}.csv'
+            self.data.to_csv(temp_file, index=False)
+            
+            # 发送文件
+            return send_file(temp_file, as_attachment=True, download_name=temp_file)
 
-    def create_data_display(self, parent):
-        """Create data display area for showing data_need_to_record"""
-        # Create a frame for data display
-        data_frame = ttk.LabelFrame(parent, text="Data Records")
-        data_frame.pack(fill=tk.X, expand=False, padx=5, pady=5)
-        
-        # Create table to display data
-        self.data_tree = ttk.Treeview(data_frame)
-        
-        # Define columns
-        self.data_tree["columns"] = (
-            "sequence", "time", "accuracy", "throughput", 
-            "batch_num", "task_num", "total_accuracy", 
-            "total_time", "total_throughput"
-        )
-        
-        # Format columns
-        self.data_tree.column("#0", width=0, stretch=tk.NO)  # Hide first column
-        self.data_tree.column("sequence", anchor=tk.CENTER, width=80)
-        self.data_tree.column("time", anchor=tk.CENTER, width=100)
-        self.data_tree.column("accuracy", anchor=tk.CENTER, width=100)
-        self.data_tree.column("throughput", anchor=tk.CENTER, width=100)
-        self.data_tree.column("batch_num", anchor=tk.CENTER, width=80)
-        self.data_tree.column("task_num", anchor=tk.CENTER, width=80)
-        self.data_tree.column("total_accuracy", anchor=tk.CENTER, width=100)
-        self.data_tree.column("total_time", anchor=tk.CENTER, width=100)
-        self.data_tree.column("total_throughput", anchor=tk.CENTER, width=100)
-        
-        # Define column headings
-        self.data_tree.heading("sequence", text="Sequence")
-        self.data_tree.heading("time", text="Time (ms)")
-        self.data_tree.heading("accuracy", text="Accuracy")
-        self.data_tree.heading("throughput", text="Throughput")
-        self.data_tree.heading("batch_num", text="Batches")
-        self.data_tree.heading("task_num", text="Tasks")
-        self.data_tree.heading("total_accuracy", text="Total Acc")
-        self.data_tree.heading("total_time", text="Total Time")
-        self.data_tree.heading("total_throughput", text="Total Thpt")
-        
-        # Add scrollbar
-        tree_scroll = ttk.Scrollbar(data_frame, orient="vertical", command=self.data_tree.yview)
-        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        self.data_tree.configure(yscrollcommand=tree_scroll.set)
-        self.data_tree.pack(fill=tk.X, expand=True, padx=5, pady=5)
-
-    def update_data_tree(self):
-        """Update data tree with the latest records"""
+    def calculate_stats(self):
+        """计算统计数据"""
         if self.data is None or self.data.empty:
-            return
+            return {}
         
-        # Clear existing items
-        for item in self.data_tree.get_children():
-            self.data_tree.delete(item)
+        last_row = self.data.iloc[-1]
         
-        # Add new data (display up to 20 most recent records)
-        display_data = self.data.tail(20)
+        # 计算准确率，避免除以零
+        task_num = last_row.get('client_sum_task_num', 0)
+        accuracy = 0 if task_num == 0 else last_row.get('client_sum_batch_accuravy_score', 0) / task_num
         
-        for _, row in display_data.iterrows():
-            self.data_tree.insert(
-                "", tk.END,
-                values=(
-                    row.get('sequence', ''),
-                    f"{row.get('single_batch_time_consumption', 0):.2f}",
-                    f"{row.get('average_batch_accuracy_score_per_batch', 0):.4f}",
-                    f"{row.get('avg_throughput_score_per_batch', 0):.2f}",
-                    row.get('client_sum_batch_num', 0),
-                    row.get('client_sum_task_num', 0),
-                    f"{row.get('client_sum_batch_accuravy_score', 0):.2f}",
-                    f"{row.get('client_sum_batch_time_consumption', 0):.2f}",
-                    f"{row.get('client_sum_batch_throughput_score', 0):.2f}"
-                )
-            )
+        # 计算平均时间，避免除以零
+        batch_num = last_row.get('client_sum_batch_num', 0)
+        avg_time = 0 if batch_num == 0 else last_row.get('client_sum_batch_time_consumption', 0) / batch_num
+        
+        # 获取当前模型名称和所有模型列表
+        current_model = last_row.get('current_using_model_name', 'N/A')
+        all_models = last_row.get('all_model_name_list', [])
+        if isinstance(all_models, str):
+            try:
+                all_models = ast.literal_eval(all_models)
+            except:
+                all_models = [all_models]
+        
+        return {
+            'total_batches': int(batch_num),
+            'total_tasks': int(task_num),
+            'avg_accuracy': round(float(accuracy), 4),
+            'avg_time': round(float(avg_time), 4),
+            'total_accuracy': round(float(last_row.get('client_sum_batch_accuravy_score', 0)), 2),
+            'total_time': round(float(last_row.get('client_sum_batch_time_consumption', 0)), 2),
+            'total_throughput': round(float(last_row.get('client_sum_batch_throughput_score', 0)), 2),
+            'current_model': current_model,
+            'all_models': all_models
+        }
 
-    def create_console_output(self, parent):
-        """Create enhanced console output area"""
-        # Create terminal output frame
-        terminal_frame = ttk.Frame(parent)
-        terminal_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+    def generate_chart_images(self):
+        """生成图表的图像，只显示三个关键指标"""
+        chart_images = {}
         
-        # Create text widget with scrollbar using fixed-width font for better terminal display
-        self.console_output = scrolledtext.ScrolledText(
-            terminal_frame, 
-            wrap=tk.WORD, 
-            font=("Courier", 10),
-            bg="#000000",  # Black background
-            fg="#FFFFFF",  # White text
-            insertbackground="#FFFFFF"  # White cursor
-        )
-        self.console_output.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        self.console_output.config(state=tk.DISABLED)  # Make it read-only
+        try:
+            # 创建 1x3 子图，只展示三个关键指标
+            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+            
+            # 获取 x 轴数据
+            x = self.data['sequence']
+            
+            # 1. 单批次处理时间
+            axes[0].plot(x, self.data['single_batch_time_consumption'], 'b-o')
+            axes[0].set_title('Batch Processing Time')
+            axes[0].set_xlabel('Sequence')
+            axes[0].set_ylabel('Time (ms)')
+            
+            # 2. 每批次准确率
+            axes[1].plot(x, self.data['average_batch_accuracy_score_per_batch'], 'g-o')
+            axes[1].set_title('Batch Accuracy Score')
+            axes[1].set_xlabel('Sequence')
+            axes[1].set_ylabel('Accuracy')
+            axes[1].set_ylim([0, 1.1])
+            
+            # 3. 每批次吞吐量
+            axes[2].plot(x, self.data['avg_throughput_score_per_batch'], 'r-o')
+            axes[2].set_title('Batch Throughput Score')
+            axes[2].set_xlabel('Sequence')
+            axes[2].set_ylabel('Score')
+            
+            # 调整布局
+            fig.tight_layout()
+            
+            # 将图表转换为 base64 编码的图像
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png', dpi=100)
+            buf.seek(0)
+            img_str = base64.b64encode(buf.read()).decode('utf-8')
+            chart_images['main_chart'] = img_str
+            
+            # 关闭图表以释放内存
+            plt.close(fig)
+            
+        except Exception as e:
+            print(f"Error generating chart images: {e}")
+            chart_images['error'] = str(e)
         
-        # Create control buttons
-        control_frame = ttk.Frame(parent)
-        control_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        # Clear button
-        clear_btn = ttk.Button(control_frame, text="Clear Console", command=self.clear_console)
-        clear_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Auto scroll option
-        self.auto_scroll_var = tk.BooleanVar(value=True)
-        auto_scroll_check = ttk.Checkbutton(
-            control_frame, 
-            text="Auto Scroll", 
-            variable=self.auto_scroll_var
-        )
-        auto_scroll_check.pack(side=tk.LEFT, padx=5)
-
-    def clear_console(self):
-        """Clear the console output"""
-        self.console_output.config(state=tk.NORMAL)
-        self.console_output.delete(1.0, tk.END)
-        self.console_output.config(state=tk.DISABLED)
-
-    def append_to_console(self, text):
-        """Append text to the console output with color formatting"""
-        self.console_output.config(state=tk.NORMAL)
-        
-        # Apply different colors based on content
-        if "error" in text.lower() or "failed" in text.lower():
-            # Error messages in red
-            self.console_output.tag_config("error", foreground="red")
-            self.console_output.insert(tk.END, text + "\n", "error")
-        elif "warning" in text.lower():
-            # Warning messages in yellow
-            self.console_output.tag_config("warning", foreground="yellow")
-            self.console_output.insert(tk.END, text + "\n", "warning")
-        elif "success" in text.lower() or "completed" in text.lower():
-            # Success messages in green
-            self.console_output.tag_config("success", foreground="green")
-            self.console_output.insert(tk.END, text + "\n", "success")
-        elif "loading" in text.lower() or "tokenizing" in text.lower():
-            # Loading messages in cyan
-            self.console_output.tag_config("info", foreground="cyan")
-            self.console_output.insert(tk.END, text + "\n", "info")
-        elif "llama_print_timings" in text:
-            # Timing information in magenta
-            self.console_output.tag_config("timing", foreground="magenta")
-            self.console_output.insert(tk.END, text + "\n", "timing")
-        else:
-            # Other text in white
-            self.console_output.insert(tk.END, text + "\n")
-        
-        # Auto-scroll if enabled
-        if self.auto_scroll_var.get():
-            self.console_output.see(tk.END)
-        
-        self.console_output.config(state=tk.DISABLED)
-
-    def create_chart_area(self, parent):
-        """Create chart area with all metrics in a single view"""
-        # Create figure with multiple subplots
-        self.fig, self.axes = plt.subplots(3, 3, figsize=(12, 8))
-        self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        return chart_images
 
     def setup_file_monitoring(self):
-        """Set up file monitoring"""
+        """设置文件监控"""
         try:
-            # Create file system event handler
+            # 创建文件系统事件处理程序
             class FileChangeHandler(FileSystemEventHandler):
                 def __init__(self, callback):
                     self.callback = callback
                     
                 def on_modified(self, event):
                     if not event.is_directory and event.src_path.endswith(self.callback.csv_file_path):
-                        if self.callback.auto_refresh_var.get():
-                            self.callback.load_data_and_update()
+                        if self.callback.auto_refresh:
+                            self.callback.load_data()
             
-            # Ensure directory exists
+            # 确保目录存在
             os.makedirs(os.path.dirname(self.csv_file_path), exist_ok=True)
             
-            # Set up observer
+            # 设置观察者
             self.event_handler = FileChangeHandler(self)
             self.observer = Observer()
             self.observer.schedule(self.event_handler, path=os.path.dirname(self.csv_file_path), recursive=False)
             self.observer.start()
         except Exception as e:
             print(f"Error setting up file monitoring: {e}")
-            # Continue without file monitoring if it fails
 
     def setup_command_output_receiver(self):
-        """Set up a socket server to receive command output"""
+        """设置命令输出接收器"""
         def socket_server():
             try:
                 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -307,11 +238,11 @@ class MetricsVisualizer:
                 
                 while True:
                     try:
-                        # Accept connections
+                        # 接受连接
                         client_socket, addr = server_socket.accept()
                         print(f"Connection accepted from {addr}")
                         
-                        # Start a thread to handle this client connection
+                        # 启动线程处理此客户端连接
                         client_thread = threading.Thread(
                             target=self.handle_client_connection,
                             args=(client_socket,),
@@ -320,27 +251,27 @@ class MetricsVisualizer:
                         client_thread.start()
                     except Exception as e:
                         print(f"Error accepting connection: {e}")
-                        time.sleep(1)  # Avoid high CPU usage
+                        time.sleep(1)  # 避免高 CPU 使用率
             except Exception as e:
                 print(f"Socket server error: {e}")
         
-        # Start socket server thread
+        # 启动 socket 服务器线程
         server_thread = threading.Thread(target=socket_server, daemon=True)
         server_thread.start()
 
     def handle_client_connection(self, client_socket):
-        """Handle client connection, receiving command output"""
+        """处理客户端连接，接收命令输出"""
         try:
             while True:
-                # First receive 4-byte length prefix
+                # 首先接收 4 字节长度前缀
                 length_prefix = client_socket.recv(4)
                 if not length_prefix:
-                    break  # Connection closed
+                    break  # 连接关闭
                     
-                # Parse message length
+                # 解析消息长度
                 message_length = struct.unpack('>I', length_prefix)[0]
                 
-                # Receive complete message
+                # 接收完整消息
                 received = 0
                 message_data = b''
                 
@@ -352,7 +283,7 @@ class MetricsVisualizer:
                     received += len(chunk)
                 
                 if received == message_length:
-                    # Decode and add to output queue
+                    # 解码并添加到输出队列
                     try:
                         decoded_message = message_data.decode('utf-8')
                         self.output_queue.put(decoded_message)
@@ -363,36 +294,19 @@ class MetricsVisualizer:
         finally:
             client_socket.close()
 
-    def update_console_output(self):
-        """Update console with any new output from the command"""
-        try:
-            # Process all available items in the queue
-            while not self.output_queue.empty():
-                output = self.output_queue.get_nowait()
-                self.append_to_console(output)
-        except queue.Empty:
-            pass
-        
-        # Schedule the next update
-        self.root.after(100, self.update_console_output)
-
     def load_data(self):
-        """Load CSV data"""
+        """加载 CSV 数据"""
         try:
             if os.path.exists(self.csv_file_path):
                 self.data = pd.read_csv(self.csv_file_path)
                 
-                # Process client_task_num_batch column, which is a list in string form
-                if 'client_task_num_batch' in self.data.columns:
-                    self.data['client_task_num_batch'] = self.data['client_task_num_batch'].apply(
-                        lambda x: ast.literal_eval(x) if isinstance(x, str) else x
-                    )
-                
-                # Update statistics and sequence label
-                self.update_stats()
-                if not self.data.empty:
-                    latest_sequence = self.data['sequence'].iloc[-1]
-                    self.sequence_label.config(text=str(latest_sequence))
+                # 处理列表格式的列
+                list_columns = ['client_task_num_batch', 'task_id_list', 'all_model_name_list']
+                for col in list_columns:
+                    if col in self.data.columns:
+                        self.data[col] = self.data[col].apply(
+                            lambda x: ast.literal_eval(x) if isinstance(x, str) else x
+                        )
                 
                 return True
             else:
@@ -402,131 +316,639 @@ class MetricsVisualizer:
             print(f"Error loading data: {e}")
             return False
 
-    def update_stats(self):
-        """Update statistics"""
-        if self.data is not None and not self.data.empty:
-            last_row = self.data.iloc[-1]
-            
-            # Calculate accuracy avoiding division by zero
-            task_num = last_row.get('client_sum_task_num', 0)
-            accuracy = 0 if task_num == 0 else last_row.get('client_sum_batch_accuravy_score', 0) / task_num
-            
-            # Calculate average time avoiding division by zero
-            batch_num = last_row.get('client_sum_batch_num', 0)
-            avg_time = 0 if batch_num == 0 else last_row.get('client_sum_batch_time_consumption', 0) / batch_num
-            
-            stats_text = (
-                f"Total Batches: {batch_num} | "
-                f"Total Tasks: {task_num} | "
-                f"Avg Accuracy: {accuracy:.4f} | "
-                f"Avg Time: {avg_time:.4f}ms"
-            )
-            self.stats_label.config(text=stats_text)
+    def get_html_template(self):
+        """获取 HTML 模板"""
+        return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Client Metrics Visualization</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 20px;
+            background-color: #f5f5f5;
+        }
+        .card {
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .console {
+            background-color: #000;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            height: 300px;
+            overflow-y: auto;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .console .error { color: #ff5555; }
+        .console .warning { color: #ffcc00; }
+        .console .success { color: #55ff55; }
+        .console .info { color: #55ccff; }
+        .console .timing { color: #ff55ff; }
+        .data-table {
+            font-size: 0.9rem;
+        }
+        .chart-container {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .chart-image {
+            max-width: 100%;
+            height: auto;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #offline-banner {
+            display: none;
+            background-color: #ff9800;
+            color: white;
+            text-align: center;
+            padding: 10px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+        .model-badge {
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+        .task-id-list {
+            max-height: 100px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+            font-family: monospace;
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+    <div id="offline-banner">
+        <strong>You are viewing cached data in offline mode</strong>
+    </div>
+    
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                        <h4 class="mb-0">Client Metrics Dashboard</h4>
+                        <div>
+                            <span class="badge bg-info me-2">Sequence: <span id="sequence-label">N/A</span></span>
+                            <button id="refresh-btn" class="btn btn-sm btn-light me-2">Refresh Data</button>
+                            <div class="form-check form-switch d-inline-block me-2">
+                                <input class="form-check-input" type="checkbox" id="auto-refresh" checked>
+                                <label class="form-check-label text-white" for="auto-refresh">Auto Refresh</label>
+                            </div>
+                            <button id="export-btn" class="btn btn-sm btn-success me-2">Export Data</button>
+                            <button id="save-snapshot-btn" class="btn btn-sm btn-warning">Save Snapshot</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="row mb-3">
+                            <!-- 模型信息卡片 -->
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header bg-info text-white">
+                                        <h5 class="mb-0">Model Information</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <h6>Current Model:</h6>
+                                                <div id="current-model" class="mb-3 fs-5 fw-bold text-primary">N/A</div>
+                                                
+                                                <h6>Available Models:</h6>
+                                                <div id="all-models" class="mb-3">
+                                                    <!-- 模型标签将在这里显示 -->
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <h6>Task IDs:</h6>
+                                                <div id="task-id-list" class="task-id-list">
+                                                    <!-- 任务ID将在这里显示 -->
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 性能指标卡片 -->
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header bg-success text-white">
+                                        <h5 class="mb-0">Performance Metrics</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row">
+                                            <div class="col-md-3">
+                                                <div class="text-center">
+                                                    <h6>Total Batches</h6>
+                                                    <h3 id="total-batches">0</h3>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="text-center">
+                                                    <h6>Total Tasks</h6>
+                                                    <h3 id="total-tasks">0</h3>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="text-center">
+                                                    <h6>Avg Accuracy</h6>
+                                                    <h3 id="avg-accuracy">0.0000</h3>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="text-center">
+                                                    <h6>Avg Time (ms)</h6>
+                                                    <h3 id="avg-time">0.0000</h3>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-    def load_data_and_update(self):
-        """Load data and update charts and data tree"""
-        if self.load_data():
-            self.update_chart()
-            self.update_data_tree()
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-secondary text-white">
+                        <h5 class="mb-0">Key Performance Charts</h5>
+                    </div>
+                    <div class="card-body p-2">
+                        <div class="chart-container">
+                            <img id="main-chart" class="chart-image" src="" alt="Loading charts...">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-    def update_chart(self):
-        """Update all charts in a single view"""
-        if self.data is None or self.data.empty:
-            return
+        <div class="row">
+            <div class="col-12 col-lg-8">
+                <div class="card">
+                    <div class="card-header bg-secondary text-white">
+                        <h5 class="mb-0">Data Records</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Sequence</th>
+                                        <th>Model</th>
+                                        <th>Time (ms)</th>
+                                        <th>Accuracy</th>
+                                        <th>Throughput</th>
+                                        <th>Batches</th>
+                                        <th>Tasks</th>
+                                        <th>Total Acc</th>
+                                        <th>Total Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="data-table-body">
+                                    <!-- Data rows will be inserted here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-lg-4">
+                <div class="card">
+                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Command Output</h5>
+                        <div>
+                            <button id="clear-console" class="btn btn-sm btn-light me-2">Clear</button>
+                            <div class="form-check form-switch d-inline-block">
+                                <input class="form-check-input" type="checkbox" id="auto-scroll" checked>
+                                <label class="form-check-label text-white" for="auto-scroll">Auto Scroll</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="console" class="console"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Global variables
+        let currentData = null;
+        let currentStats = null;
+        let currentSequence = null;
+        let isOfflineMode = false;
+        let consoleLines = [];
+        let autoScroll = true;
+        let autoRefresh = true;
+        let refreshInterval = null;
         
-        try:
-            # Clear all axes
-            for ax in self.axes.flat:
-                ax.clear()
+        // DOM elements
+        const offlineBanner = document.getElementById('offline-banner');
+        const sequenceLabel = document.getElementById('sequence-label');
+        const totalBatches = document.getElementById('total-batches');
+        const totalTasks = document.getElementById('total-tasks');
+        const avgAccuracy = document.getElementById('avg-accuracy');
+        const avgTime = document.getElementById('avg-time');
+        const dataTableBody = document.getElementById('data-table-body');
+        const consoleOutput = document.getElementById('console');
+        const refreshBtn = document.getElementById('refresh-btn');
+        const exportBtn = document.getElementById('export-btn');
+        const saveSnapshotBtn = document.getElementById('save-snapshot-btn');
+        const autoRefreshCheckbox = document.getElementById('auto-refresh');
+        const autoScrollCheckbox = document.getElementById('auto-scroll');
+        const clearConsoleBtn = document.getElementById('clear-console');
+        const mainChart = document.getElementById('main-chart');
+        const currentModel = document.getElementById('current-model');
+        const allModels = document.getElementById('all-models');
+        const taskIdList = document.getElementById('task-id-list');
+        
+        // Initialize app
+        function initializeApp() {
+            // Check initial online status
+            updateOnlineStatus();
             
-            # Set chart style
-            sns.set_style("whitegrid")
+            // Set up online/offline event listeners
+            window.addEventListener('online', updateOnlineStatus);
+            window.addEventListener('offline', updateOnlineStatus);
             
-            # Get sequence for x-axis
-            x = self.data['sequence']
+            // Set up event listeners
+            refreshBtn.addEventListener('click', refreshData);
+            exportBtn.addEventListener('click', exportData);
+            saveSnapshotBtn.addEventListener('click', saveSnapshot);
+            autoRefreshCheckbox.addEventListener('change', function() {
+                autoRefresh = this.checked;
+                if (autoRefresh) {
+                    startAutoRefresh();
+                } else {
+                    stopAutoRefresh();
+                }
+                fetch('/toggle_refresh');
+            });
+            autoScrollCheckbox.addEventListener('change', function() {
+                autoScroll = this.checked;
+            });
+            clearConsoleBtn.addEventListener('click', function() {
+                consoleOutput.innerHTML = '';
+                consoleLines = [];
+            });
             
-            # 1. Single batch time consumption
-            self.axes[0, 0].plot(x, self.data['single_batch_time_consumption'], 'b-o')
-            self.axes[0, 0].set_title('Batch Processing Time')
-            self.axes[0, 0].set_xlabel('Sequence')
-            self.axes[0, 0].set_ylabel('Time (ms)')
+            // Set up Server-Sent Events for console output
+            setupConsoleEventSource();
             
-            # 2. Accuracy score per batch
-            self.axes[0, 1].plot(x, self.data['average_batch_accuracy_score_per_batch'], 'g-o')
-            self.axes[0, 1].set_title('Batch Accuracy Score')
-            self.axes[0, 1].set_xlabel('Sequence')
-            self.axes[0, 1].set_ylabel('Accuracy')
-            self.axes[0, 1].set_ylim([0, 1.1])
+            // Start auto refresh
+            startAutoRefresh();
             
-            # 3. Throughput score per batch
-            self.axes[0, 2].plot(x, self.data['avg_throughput_score_per_batch'], 'r-o')
-            self.axes[0, 2].set_title('Batch Throughput Score')
-            self.axes[0, 2].set_xlabel('Sequence')
-            self.axes[0, 2].set_ylabel('Score')
+            // Initial data load
+            refreshData();
+        }
+        
+        // Update online status
+        function updateOnlineStatus() {
+            isOfflineMode = !navigator.onLine;
+            if (isOfflineMode) {
+                offlineBanner.style.display = 'block';
+                loadFromCache();
+            } else {
+                offlineBanner.style.display = 'none';
+                refreshData();
+            }
+        }
+        
+        // Set up Server-Sent Events
+        function setupConsoleEventSource() {
+            const eventSource = new EventSource('/console_stream');
             
-            # 4. Cumulative batch count
-            self.axes[1, 0].plot(x, self.data['client_sum_batch_num'], 'c-o')
-            self.axes[1, 0].set_title('Cumulative Batch Count')
-            self.axes[1, 0].set_xlabel('Sequence')
-            self.axes[1, 0].set_ylabel('Count')
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                if (data.text) {
+                    appendToConsole(data.text);
+                }
+            };
             
-            # 5. Cumulative task count
-            self.axes[1, 1].plot(x, self.data['client_sum_task_num'], 'm-o')
-            self.axes[1, 1].set_title('Cumulative Task Count')
-            self.axes[1, 1].set_xlabel('Sequence')
-            self.axes[1, 1].set_ylabel('Count')
+            eventSource.onerror = function() {
+                console.error('EventSource failed, reconnecting in 5 seconds...');
+                setTimeout(setupConsoleEventSource, 5000);
+            };
+        }
+        
+        // Start auto refresh
+        function startAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+            refreshInterval = setInterval(refreshData, 5000);
+        }
+        
+        // Stop auto refresh
+        function stopAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+        
+        // Refresh data
+        function refreshData() {
+            if (!navigator.onLine) {
+                loadFromCache();
+                return;
+            }
             
-            # 6. Cumulative accuracy score
-            self.axes[1, 2].plot(x, self.data['client_sum_batch_accuravy_score'], 'y-o')
-            self.axes[1, 2].set_title('Cumulative Accuracy Score')
-            self.axes[1, 2].set_xlabel('Sequence')
-            self.axes[1, 2].set_ylabel('Score')
+            // Fetch data
+            fetch('/data')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.data) {
+                        currentData = data.data;
+                        currentStats = data.stats;
+                        currentSequence = data.sequence;
+                        
+                        updateDataTable(currentData);
+                        updateStats(currentStats);
+                        updateModelInfo(currentData[currentData.length - 1], currentStats);
+                        sequenceLabel.textContent = currentSequence;
+                        
+                        // Cache the data
+                        cacheCurrentState();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching data:', error);
+                    loadFromCache();
+                });
             
-            # 7. Cumulative time consumption
-            self.axes[2, 0].plot(x, self.data['client_sum_batch_time_consumption'], 'b-o')
-            self.axes[2, 0].set_title('Cumulative Processing Time')
-            self.axes[2, 0].set_xlabel('Sequence')
-            self.axes[2, 0].set_ylabel('Time (ms)')
+            // Fetch charts
+            fetch('/charts')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.main_chart) {
+                        mainChart.src = 'data:image/png;base64,' + data.main_chart;
+                        
+                        // Cache the chart
+                        localStorage.setItem('cachedChart', data.main_chart);
+                    } else if (data.error) {
+                        console.error('Error generating charts:', data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching charts:', error);
+                    // Try to load cached chart
+                    const cachedChart = localStorage.getItem('cachedChart');
+                    if (cachedChart) {
+                        mainChart.src = 'data:image/png;base64,' + cachedChart;
+                    }
+                });
+        }
+        
+        // Export data
+        function exportData() {
+            window.location.href = '/export_data';
+        }
+        
+        // Save snapshot
+        function saveSnapshot() {
+            const name = prompt('Enter a name for this snapshot:', 'Snapshot_' + new Date().toISOString().replace(/[:.]/g, '-'));
+            if (!name) return;
             
-            # 8. Cumulative throughput score
-            self.axes[2, 1].plot(x, self.data['client_sum_batch_throughput_score'], 'g-o')
-            self.axes[2, 1].set_title('Cumulative Throughput Score')
-            self.axes[2, 1].set_xlabel('Sequence')
-            self.axes[2, 1].set_ylabel('Score')
-            
-            # 9. Task distribution (from the latest record)
-            if len(self.data) > 0 and 'client_task_num_batch' in self.data.columns:
-                last_row = self.data.iloc[-1]
-                task_batches = last_row['client_task_num_batch']
+            try {
+                const snapshot = {
+                    name: name,
+                    date: new Date().toISOString(),
+                    data: currentData,
+                    stats: currentStats,
+                    sequence: currentSequence,
+                    chart: localStorage.getItem('cachedChart'),
+                    console: consoleLines
+                };
                 
-                if isinstance(task_batches, list) and len(task_batches) > 0:
-                    self.axes[2, 2].hist(task_batches, bins=min(10, len(set(task_batches))), 
-                                         color='skyblue', edgecolor='black')
-                    self.axes[2, 2].set_title('Task Batch Size Distribution')
-                    self.axes[2, 2].set_xlabel('Tasks per Batch')
-                    self.axes[2, 2].set_ylabel('Frequency')
+                // Get existing snapshots
+                let snapshots = JSON.parse(localStorage.getItem('snapshots') || '[]');
+                
+                // Add new snapshot
+                snapshots.push(snapshot);
+                
+                // Save to localStorage
+                localStorage.setItem('snapshots', JSON.stringify(snapshots));
+                
+                alert(`Snapshot "${name}" saved successfully!`);
+            } catch (error) {
+                console.error('Failed to save snapshot:', error);
+                alert('Failed to save snapshot: ' + error.message);
+            }
+        }
+        
+        // Update model information
+        function updateModelInfo(latestData, stats) {
+            // 更新当前模型
+            if (stats.current_model) {
+                currentModel.textContent = stats.current_model;
+            }
             
-            # Adjust layout
-            self.fig.tight_layout()
-            self.canvas.draw()
-        except Exception as e:
-            print(f"Error updating charts: {e}")
+            // 更新所有可用模型列表
+            allModels.innerHTML = '';
+            if (stats.all_models && stats.all_models.length > 0) {
+                stats.all_models.forEach(model => {
+                    const badge = document.createElement('span');
+                    badge.className = 'badge bg-secondary model-badge';
+                    badge.textContent = model;
+                    allModels.appendChild(badge);
+                });
+            } else {
+                allModels.textContent = 'No models available';
+            }
+            
+            // 更新任务 ID 列表
+            taskIdList.innerHTML = '';
+            if (latestData.task_id_list && latestData.task_id_list.length > 0) {
+                latestData.task_id_list.forEach(taskId => {
+                    const taskElement = document.createElement('div');
+                    taskElement.textContent = taskId;
+                    taskIdList.appendChild(taskElement);
+                });
+            } else {
+                taskIdList.textContent = 'No tasks';
+            }
+        }
+        
+        // Update data table
+        function updateDataTable(data) {
+            dataTableBody.innerHTML = '';
+            
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                
+                tr.innerHTML = `
+                    <td>${row.sequence}</td>
+                    <td>${row.current_using_model_name || 'N/A'}</td>
+                    <td>${parseFloat(row.single_batch_time_consumption).toFixed(2)}</td>
+                    <td>${parseFloat(row.average_batch_accuracy_score_per_batch).toFixed(4)}</td>
+                    <td>${parseFloat(row.avg_throughput_score_per_batch).toFixed(2)}</td>
+                    <td>${row.client_sum_batch_num}</td>
+                    <td>${row.client_sum_task_num}</td>
+                    <td>${parseFloat(row.client_sum_batch_accuravy_score).toFixed(2)}</td>
+                    <td>${parseFloat(row.client_sum_batch_time_consumption).toFixed(2)}</td>
+                `;
+                
+                dataTableBody.appendChild(tr);
+            });
+        }
+        
+        // Update statistics
+        function updateStats(stats) {
+            totalBatches.textContent = stats.total_batches;
+            totalTasks.textContent = stats.total_tasks;
+            avgAccuracy.textContent = stats.avg_accuracy.toFixed(4);
+            avgTime.textContent = stats.avg_time.toFixed(4);
+        }
+        
+        // Append text to console
+        function appendToConsole(text) {
+            const line = document.createElement('div');
+            
+            // Apply different colors based on content
+            if (text.toLowerCase().includes('error') || text.toLowerCase().includes('failed')) {
+                line.className = 'error';
+            } else if (text.toLowerCase().includes('warning')) {
+                line.className = 'warning';
+            } else if (text.toLowerCase().includes('success') || text.toLowerCase().includes('completed')) {
+                line.className = 'success';
+            } else if (text.toLowerCase().includes('loading') || text.toLowerCase().includes('tokenizing')) {
+                line.className = 'info';
+            } else if (text.includes('llama_print_timings')) {
+                line.className = 'timing';
+            }
+            
+            line.textContent = text;
+            consoleOutput.appendChild(line);
+            
+            // Store console line for caching
+            consoleLines.push({
+                text: text,
+                className: line.className
+            });
+            
+            // Limit console lines to prevent excessive memory usage
+            if (consoleLines.length > 1000) {
+                consoleLines.shift();
+            }
+            
+            // Auto-scroll if enabled
+            if (autoScroll) {
+                consoleOutput.scrollTop = consoleOutput.scrollHeight;
+            }
+        }
+        
+        // Cache current state
+        function cacheCurrentState() {
+            try {
+                const state = {
+                    timestamp: Date.now(),
+                    data: currentData,
+                    stats: currentStats,
+                    sequence: currentSequence,
+                    console: consoleLines
+                };
+                
+                localStorage.setItem('currentState', JSON.stringify(state));
+            } catch (error) {
+                console.error('Failed to cache state:', error);
+            }
+        }
+        
+        // Load from cache
+        function loadFromCache() {
+            try {
+                const cachedState = localStorage.getItem('currentState');
+                if (cachedState) {
+                    const state = JSON.parse(cachedState);
+                    
+                    currentData = state.data;
+                    currentStats = state.stats;
+                    currentSequence = state.sequence;
+                    
+                    if (currentData && currentData.length > 0) {
+                        updateDataTable(currentData);
+                        if (currentStats) {
+                            updateStats(currentStats);
+                            updateModelInfo(currentData[currentData.length - 1], currentStats);
+                        }
+                    }
+                    if (currentSequence) sequenceLabel.textContent = currentSequence;
+                    
+                    // Try to load cached chart
+                    const cachedChart = localStorage.getItem('cachedChart');
+                    if (cachedChart) {
+                        mainChart.src = 'data:image/png;base64,' + cachedChart;
+                    }
+                    
+                    // Restore console output
+                    if (state.console && state.console.length > 0) {
+                        consoleOutput.innerHTML = '';
+                        consoleLines = state.console;
+                        
+                        consoleLines.forEach(line => {
+                            const lineElement = document.createElement('div');
+                            if (line.className) {
+                                lineElement.className = line.className;
+                            }
+                            lineElement.textContent = line.text;
+                            consoleOutput.appendChild(lineElement);
+                        });
+                        
+                        if (autoScroll) {
+                            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load from cache:', error);
+            }
+        }
+        
+        // Initialize the app when DOM is loaded
+        document.addEventListener('DOMContentLoaded', initializeApp);
+    </script>
+</body>
+</html>
+        """
 
     def run(self):
-        """Run visualization client"""
+        """运行 Web 可视化器"""
         try:
-            self.root.mainloop()
+            print(f"Starting web server on port {self.port}...")
+            print(f"Open http://localhost:{self.port} in your browser")
+            self.app.run(host='0.0.0.0', port=self.port, debug=False, threaded=True)
         finally:
-            # Ensure observer stops when program exits
+            # 确保观察者停止
             if hasattr(self, 'observer'):
                 self.observer.stop()
                 self.observer.join()
 
 
 if __name__ == "__main__":
-    # Ensure directory exists
+    # 确保目录存在
     os.makedirs('metrics/client', exist_ok=True)
     
-    # Create and run visualizer
-    visualizer = MetricsVisualizer()
+    # 创建并运行 Web 可视化器
+    visualizer = WebMetricsVisualizer(port=12347)
     visualizer.run()

@@ -36,7 +36,7 @@
     },
     "edge_deployment":{
         "model_save_path":"model/models", 
-        "llama_cli_path":"/home/wu/workspace/LLM_Distribution_Edge/build/bin/llama-cli"
+        "llama_cli_path":"/home/junyuan/workspace/LLM_Distribution_Edge/build/bin/llama-cli"
     },
     "task_type_config":{
         "TC":{},
@@ -44,5 +44,8 @@
         "QA":{},
         "TL":{},
         "SG":{}
+    },
+    "visualization" : {
+        "trigger": true
     }
 }

@@ -62,6 +62,9 @@ class Client_Connection:
         
         self.data_need_to_record = {}
         
+        # visualization trigger
+        self.visualization_flag = visualization_config_init(config_path)
+        self.visualization_trigger = self.visualization_flag.get('trigger',False)
         
         
     def generate_models_path(self, relative_directory):
@@ -79,7 +82,7 @@ class Client_Connection:
         directory = os.path.abspath(self.models_save_directory)
         gguf_files = glob.glob(os.path.join(directory, "*.gguf"))
         if type(gguf_files == list):
-            return gguf_files[0]
+            return gguf_files[0],gguf_files
         return gguf_files
 
     def single_process(self):
@@ -94,7 +97,8 @@ class Client_Connection:
         task_list = origin_info.get('tasks',{}).get('task_set',[])
         logging.info(f"task_list = {task_list}")
         num_task_list = len(task_list)
-        #
+        # ui
+        task_id_list = []
         
         # metrics calculation
         # received timestamp for single batch
@@ -105,21 +109,21 @@ class Client_Connection:
         #logging.info(f"task_list =  {task_list}")
         
         # get model path and llama_cli_path  for cmd running      
-        model_path = self.generate_model_to_be_used_path()
+        current_using_model_path, all_model_path = self.generate_model_to_be_used_path()
         llama_cli_path = self.generate_llama_cli_path()
         
         total_cpu_usage_percentage = 0
         total_mem_usage_percentage = 0
         
         for task in task_list:
-            
+            task_id_list.append(task.get('task_id',0))
             # cmd进行任务处理
             token_type = task.get('task_type')
             token = task.get('task_token')
             reference_value = task.get('reference_value')
             query_prefix = self.input_processor.generate_query_word_from_task_type(token_type)
             # 获取单次token_prediction的处理结果
-            token_prediction, resource_used_status = self.cmd_operator.run_task_process_cmd(query_prefix=query_prefix, query_word=token, llama_cli_path = llama_cli_path, model_path=model_path)
+            token_prediction, resource_used_status = self.cmd_operator.run_task_process_cmd(query_prefix=query_prefix, query_word=token, llama_cli_path = llama_cli_path, model_path=current_using_model_path,enable_visualization=self.visualization_trigger)
             
             # single task accuracy
             accuracy_score = self.metrics_operator.process(type = token_type, prediction = token_prediction, reference = reference_value)
@@ -156,10 +160,17 @@ class Client_Connection:
         self.client_sum_batch_throughput_score += avg_throughput_score_per_batch
         self.client_task_num_batch.append(num_task_list)
         
-        
+        current_using_model_name = os.path.basename(current_using_model_path)[:-5] if current_using_model_path.endswith(".gguf") else os.path.basename(current_using_model_path)
+        all_model_name_list = []
+        for model_path in all_model_path:
+            model_name = os.path.basename(model_path)[:-5] if model_path.endswith(".gguf") else os.path.basename(model_path)
+            all_model_name_list.append(model_name)
         # record metrics
         data_need_to_record = {
             "sequence":sequence,
+            "task_id_list":task_id_list,
+            "current_using_model_name":current_using_model_name,
+            "all_model_name_list":all_model_name_list,
             "single_batch_time_consumption" : single_batch_time_consumption,
             "average_batch_accuracy_score_per_batch":average_batch_accuracy_score_per_batch,
             "avg_throughput_score_per_batch": avg_throughput_score_per_batch,

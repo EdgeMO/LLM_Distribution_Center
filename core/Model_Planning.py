@@ -4,6 +4,7 @@ import time
 current_working_directory = os.getcwd()
 import csv
 import numpy as np
+import json
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 sys.path.append(current_working_directory)
@@ -48,7 +49,7 @@ class Core:
         self.center.establish_connection()
         for sequence in range(300):
             # 生成当前时刻下的任务集合
-            task_set = self.input_generator.generate_task_set_for_each_timestamp(1)
+            task_set = self.input_generator.generate_task_set_for_each_timestamp(2)
             formated_input_for_algorithm = []
             """            
             {
@@ -147,7 +148,7 @@ class Core:
             core_data_need_to_record['task_inference_time'] = task_distribution_end_time - task_distribution_start_time
             core_data_need_to_record['edge_observation'] = update_system_observation
             core_data_need_to_record['sequence'] = sequence
-            print(core_data_need_to_record)
+            core_data_need_to_record['message_list']=message_list
             self.record_observation_to_csv(core_data_need_to_record)
             self.allocator.feedback(update_system_observation)
 
@@ -163,44 +164,72 @@ class Core:
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         
         try:
-            # 处理嵌套结构，创建适合CSV的平面数据结构
-            rows_to_write = []
-            
-            # 提取基本数据
-            base_data = {
-                'task_inference_time': data['task_inference_time'],
-                'sequence': data['sequence']
+            # 创建单行数据
+            row = {
+                'sequence': data['sequence'],
+                'task_inference_time': data['task_inference_time']
             }
             
-            # 为每个edge观测创建一行数据
-            for edge_obs in data['edge_observation']:
-                row = base_data.copy()  # 复制基本数据
-                row.update(edge_obs)    # 添加edge观测数据
-                rows_to_write.append(row)
+            # 从message_list中提取任务ID和类型信息，并按edge_id分组
+            tasks_by_edge = {}
+            if 'message_list' in data:
+                for edge_msg in data['message_list']:
+                    edge_id = edge_msg.get('edge_id')
+                    if edge_id not in tasks_by_edge:
+                        tasks_by_edge[edge_id] = []
+                    
+                    for task in edge_msg.get('task_set', []):
+                        tasks_by_edge[edge_id].append({
+                            'task_id': task.get('task_id'),
+                            'task_type': task.get('task_type')
+                        })
+            
+            # 将分组后的任务信息转换为列表
+            tasks_allocation = []
+            for edge_id in sorted(tasks_by_edge.keys(), key=lambda x: int(x) if x.isdigit() else float('inf')):
+                for task in tasks_by_edge[edge_id]:
+                    tasks_allocation.append({
+                        'edge_id': edge_id,
+                        'task_id': task['task_id'],
+                        'task_type': task['task_type']
+                    })
+            
+            # 将任务信息转换为JSON字符串
+            row['tasks_allocation'] = json.dumps(tasks_allocation)
+            
+            # 将边缘节点观测数据转换为JSON字符串，按照遍历顺序自动生成edge_id
+            edge_observations = {}
+            for i, edge_obs in enumerate(data['edge_observation']):
+                edge_id = str(i)  # 使用索引作为edge_id
+                
+                edge_observations[edge_id] = {
+                    'accuracy': edge_obs.get('accuracy'),
+                    'latency': edge_obs.get('latency'),
+                    'avg_throughput': edge_obs.get('avg_throughput')
+                }
+            
+            row['edge_observations'] = json.dumps(edge_observations)
             
             # 检查文件是否存在
             file_exists = os.path.isfile(file_path)
             
             # 写入CSV
             with open(file_path, 'a+', newline='') as csvfile:
-                if rows_to_write:
-                    fieldnames = list(rows_to_write[0].keys())
-                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                    
-                    # 如果文件不存在，写入表头
-                    if not file_exists:
-                        writer.writeheader()
-                    
-                    # 写入所有行
-                    writer.writerows(rows_to_write)
-                    
-                    print(f"数据已成功追加到 {file_path}")
-                else:
-                    print("没有数据可写入")
+                fieldnames = list(row.keys())
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                
+                # 如果文件不存在，写入表头
+                if not file_exists:
+                    writer.writeheader()
+                
+                # 写入数据行
+                writer.writerow(row)
+                print(f"数据已成功追加到 {file_path}")
         
         except Exception as e:
             print(f"写入CSV文件时出错: {e}")
-            
+
+
 if __name__ == "__main__":
     core = Core()
     core.process()

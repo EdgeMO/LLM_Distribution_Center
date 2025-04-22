@@ -39,3 +39,17 @@ This document describes the code implementation of the center. The main steps in
   * *reference_value* : ideal standard answer
 * **task_token** :
   Query words.
+
+
+# LLM model metrics
+
+* **perplexity comparison** :
+
+![perplexity vs model size](metrics/model_size_vs_ppl.png)
+
+* **load time comparision** :
+
+![model load time vs model size](metrics/model_size_vs_load_time.png)
+
+* **token process time comparision** :
+![model ptocess time vs model size](metrics/model_size_vs_token_time.png)

@@ -31,6 +31,11 @@ def client_model_util_init(config_path):
         res = json.load(file)
         edge_deployment = res.get('edge_deployment',None)
         return edge_deployment
+def visualization_config_init(config_path):
+    with open(file = config_path, mode= 'r') as file:
+        res = json.load(file)
+        visualization_config = res.get('visualization',None)
+        return visualization_config
 
 def create_model_info_from_dict(model_dict, id_value):
     """
