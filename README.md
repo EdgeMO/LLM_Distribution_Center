@@ -53,3 +53,19 @@ This document describes the code implementation of the center. The main steps in
 
 * **token process time comparision** :
 ![model ptocess time vs model size](metrics/model_size_vs_token_time.png)
+
+* **UI** :
+
+2025/05/14 updates:
+add flask UI monitoring
+* **Center**
+’python common_tool/center_monitor.py‘
+![center](metrics/png/center.jpeg)
+![center_gif](metrics/gif/center_gif.gif)
+* **Edge**
+'python common_tool/client_moniter.py'
+![edge](metrics/png/edge.jpeg)
+![edge_gif](metrics/gif/edge_gif.gif)
+* **terminal**
+![terminal](metrics/gif/terminal.gif)
+

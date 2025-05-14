@@ -258,18 +258,20 @@ class WebMetricsVisualizer:
         # 启动 socket 服务器线程
         server_thread = threading.Thread(target=socket_server, daemon=True)
         server_thread.start()
-
     def handle_client_connection(self, client_socket):
         """处理客户端连接，接收命令输出"""
         try:
+            print("New client connection established")
             while True:
                 # 首先接收 4 字节长度前缀
                 length_prefix = client_socket.recv(4)
                 if not length_prefix:
+                    print("Connection closed by client")
                     break  # 连接关闭
                     
                 # 解析消息长度
                 message_length = struct.unpack('>I', length_prefix)[0]
+                print(f"Receiving message of length: {message_length}")
                 
                 # 接收完整消息
                 received = 0
@@ -286,14 +288,15 @@ class WebMetricsVisualizer:
                     # 解码并添加到输出队列
                     try:
                         decoded_message = message_data.decode('utf-8')
+                        print(f"Received message: {decoded_message[:50]}...")  # 打印前50个字符
                         self.output_queue.put(decoded_message)
                     except UnicodeDecodeError:
                         print(f"Error decoding message: {message_data}")
         except Exception as e:
             print(f"Error handling client connection: {e}")
         finally:
+            print("Client connection closed")
             client_socket.close()
-
     def load_data(self):
         """加载 CSV 数据"""
         try:
@@ -329,21 +332,108 @@ class WebMetricsVisualizer:
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body {
-            padding-top: 20px;
+            padding: 10px 0;
             background-color: #f5f5f5;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .container-fluid {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            max-height: 100vh;
         }
         .card {
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         .console {
             background-color: #000;
             color: #fff;
             font-family: 'Courier New', monospace;
-            height: 300px;
+            height: 280px;  /* 增加高度以匹配图表 */
             overflow-y: auto;
-            padding: 10px;
+            padding: 8px;
             border-radius: 5px;
+            font-size: 0.9rem;
+        }
+        .chart-container {
+            text-align: center;
+        }
+        .chart-image {
+            max-width: 100%;
+            max-height: 280px;  /* 限制图表高度 */
+            object-fit: contain;
+            border-radius: 5px;
+        }
+        .metric-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            margin-bottom: 0;
+            line-height: 1.2;
+        }
+        .metric-label {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+        .task-allocation-table {
+            font-size: 0.85rem;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .table {
+            margin-bottom: 0;
+        }
+        .page-title {
+            margin-bottom: 10px;
+            text-align: center;
+            font-size: 1.8rem;
+            color: #333;
+            font-weight: bold;
+        }
+        .button-group {
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .button-group button {
+            margin: 0 3px;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.85rem;
+        }
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .main-section {
+            display: flex;
+            flex-direction: row;
+            gap: 10px;
+        }
+        .left-column {
+            flex: 0 0 52%;
+            display: flex;
+            flex-direction: column;
+        }
+        .right-column {
+            flex: 0 0 46%;
+            display: flex;
+            flex-direction: column;
+        }
+        .card-header {
+            padding: 0.5rem 1rem;
+        }
+        .card-header h4, .card-header h5 {
+            margin-bottom: 0;
+            font-size: 1rem;
+        }
+        .card-body {
+            padding: 10px;
+        }
+        .table>:not(caption)>*>* {
+            padding: 0.3rem;
         }
         .console .error { color: #ff5555; }
         .console .warning { color: #ffcc00; }
@@ -352,16 +442,6 @@ class WebMetricsVisualizer:
         .console .timing { color: #ff55ff; }
         .data-table {
             font-size: 0.9rem;
-        }
-        .chart-container {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-        .chart-image {
-            max-width: 100%;
-            height: auto;
-            border-radius: 5px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         #offline-banner {
             display: none;
@@ -386,6 +466,38 @@ class WebMetricsVisualizer:
             border: 1px solid #dee2e6;
             font-family: monospace;
             font-size: 0.85rem;
+        }
+        .latest-data {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .metric-card {
+            flex: 1 0 180px;
+            padding: 10px;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+            text-align: center;
+        }
+        .metric-card h6 {
+            margin-bottom: 5px;
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        .metric-card .value {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #343a40;
+        }
+        .metric-card.highlight {
+            background-color: #e2f3ff;
+            border-color: #90caf9;
+        }
+        @media (max-width: 992px) {
+            .charts-and-console {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -483,15 +595,81 @@ class WebMetricsVisualizer:
             </div>
         </div>
 
-        <div class="row">
+        <!-- 新增: 最新一次运行数据详细信息 -->
+        <div class="row mb-3">
             <div class="col-12">
                 <div class="card">
-                    <div class="card-header bg-secondary text-white">
-                        <h5 class="mb-0">Key Performance Charts</h5>
+                    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Latest Run Details</h5>
+                        <span class="badge bg-light text-dark" id="latest-run-timestamp">No Data</span>
                     </div>
-                    <div class="card-body p-2">
-                        <div class="chart-container">
-                            <img id="main-chart" class="chart-image" src="" alt="Loading charts...">
+                    <div class="card-body">
+                        <div class="latest-data" id="latest-metrics">
+                            <!-- 最新指标将在这里显示 -->
+                            <div class="metric-card">
+                                <h6>Sequence</h6>
+                                <div class="value" id="latest-sequence">-</div>
+                            </div>
+                            <div class="metric-card highlight">
+                                <h6>Time (ms)</h6>
+                                <div class="value" id="latest-time">-</div>
+                            </div>
+                            <div class="metric-card highlight">
+                                <h6>Accuracy</h6>
+                                <div class="value" id="latest-accuracy">-</div>
+                            </div>
+                            <div class="metric-card highlight">
+                                <h6>Throughput</h6>
+                                <div class="value" id="latest-throughput">-</div>
+                            </div>
+                            <div class="metric-card">
+                                <h6>Current Tasks</h6>
+                                <div class="value" id="latest-tasks">-</div>
+                            </div>
+                            <div class="metric-card">
+                                <h6>Current Batches</h6>
+                                <div class="value" id="latest-batches">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 修改: 将图表和控制台放在同一行 -->
+        <div class="row">
+            <div class="col-12">
+                <div class="row charts-and-console">
+                    <!-- 左侧：关键性能图表 -->
+                    <div class="col-md-8">
+                        <div class="card">
+                            <div class="card-header bg-secondary text-white">
+                                <h5 class="mb-0">Key Performance Charts</h5>
+                            </div>
+                            <div class="card-body p-2">
+                                <div class="chart-container">
+                                    <img id="main-chart" class="chart-image" src="" alt="Loading charts...">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 右侧：命令输出 -->
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">Command Output</h5>
+                                <div>
+                                    <button id="clear-console" class="btn btn-sm btn-light me-2">Clear</button>
+                                    <div class="form-check form-switch d-inline-block">
+                                        <input class="form-check-input" type="checkbox" id="auto-scroll" checked>
+                                        <label class="form-check-label text-white" for="auto-scroll">Auto Scroll</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-body p-0">
+                                <div id="console" class="console"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -499,14 +677,14 @@ class WebMetricsVisualizer:
         </div>
 
         <div class="row">
-            <div class="col-12 col-lg-8">
+            <div class="col-12">
                 <div class="card">
                     <div class="card-header bg-secondary text-white">
                         <h5 class="mb-0">Data Records</h5>
                     </div>
                     <div class="card-body">
                         <div class="table-responsive">
-                            <table class="table table-striped table-hover data-table">
+                            <table class="table table-striped table-hover table-sm data-table">
                                 <thead>
                                     <tr>
                                         <th>Sequence</th>
@@ -525,24 +703,6 @@ class WebMetricsVisualizer:
                                 </tbody>
                             </table>
                         </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-12 col-lg-4">
-                <div class="card">
-                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Command Output</h5>
-                        <div>
-                            <button id="clear-console" class="btn btn-sm btn-light me-2">Clear</button>
-                            <div class="form-check form-switch d-inline-block">
-                                <input class="form-check-input" type="checkbox" id="auto-scroll" checked>
-                                <label class="form-check-label text-white" for="auto-scroll">Auto Scroll</label>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="card-body p-0">
-                        <div id="console" class="console"></div>
                     </div>
                 </div>
             </div>
@@ -581,6 +741,15 @@ class WebMetricsVisualizer:
         const currentModel = document.getElementById('current-model');
         const allModels = document.getElementById('all-models');
         const taskIdList = document.getElementById('task-id-list');
+        
+        // Latest run elements
+        const latestRunTimestamp = document.getElementById('latest-run-timestamp');
+        const latestSequence = document.getElementById('latest-sequence');
+        const latestTime = document.getElementById('latest-time');
+        const latestAccuracy = document.getElementById('latest-accuracy');
+        const latestThroughput = document.getElementById('latest-throughput');
+        const latestTasks = document.getElementById('latest-tasks');
+        const latestBatches = document.getElementById('latest-batches');
         
         // Initialize app
         function initializeApp() {
@@ -686,6 +855,7 @@ class WebMetricsVisualizer:
                         updateDataTable(currentData);
                         updateStats(currentStats);
                         updateModelInfo(currentData[currentData.length - 1], currentStats);
+                        updateLatestRunData(currentData[currentData.length - 1]); // Update latest run data
                         sequenceLabel.textContent = currentSequence;
                         
                         // Cache the data
@@ -718,6 +888,28 @@ class WebMetricsVisualizer:
                         mainChart.src = 'data:image/png;base64,' + cachedChart;
                     }
                 });
+        }
+        
+        // Update latest run data
+        function updateLatestRunData(latestData) {
+            if (!latestData) return;
+            
+            // Format timestamp
+            const now = new Date();
+            const timestamp = now.toLocaleTimeString();
+            latestRunTimestamp.textContent = `Last Updated: ${timestamp}`;
+            
+            // Update metrics
+            latestSequence.textContent = latestData.sequence;
+            latestTime.textContent = parseFloat(latestData.single_batch_time_consumption).toFixed(2);
+            latestAccuracy.textContent = parseFloat(latestData.average_batch_accuracy_score_per_batch).toFixed(4);
+            latestThroughput.textContent = parseFloat(latestData.avg_throughput_score_per_batch).toFixed(2);
+            latestTasks.textContent = latestData.client_task_num_batch 
+                ? (Array.isArray(latestData.client_task_num_batch) 
+                   ? latestData.client_task_num_batch.length 
+                   : latestData.client_task_num_batch)
+                : '0';
+            latestBatches.textContent = latestData.client_sum_batch_num || '0';
         }
         
         // Export data
@@ -794,7 +986,13 @@ class WebMetricsVisualizer:
         function updateDataTable(data) {
             dataTableBody.innerHTML = '';
             
-            data.forEach(row => {
+            // 创建数据副本以避免修改原始数据
+            const sortedData = [...data];
+            
+            // 按序列号倒序排序数据
+            sortedData.sort((a, b) => b.sequence - a.sequence);
+            
+            sortedData.forEach(row => {
                 const tr = document.createElement('tr');
                 
                 tr.innerHTML = `
@@ -888,6 +1086,7 @@ class WebMetricsVisualizer:
                     
                     if (currentData && currentData.length > 0) {
                         updateDataTable(currentData);
+                        updateLatestRunData(currentData[currentData.length - 1]); // Update latest run data
                         if (currentStats) {
                             updateStats(currentStats);
                             updateModelInfo(currentData[currentData.length - 1], currentStats);

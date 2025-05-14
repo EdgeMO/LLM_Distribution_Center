@@ -137,9 +137,9 @@ class Core:
                 edge_observation = value['observation']
                 for key,value in edge_observation.items():
                     # 为算法包装更新量
-                    if 'time' in key:
-                        temp_dict['accuracy'] = value
                     if 'accuracy' in key:
+                        temp_dict['accuracy'] = value
+                    if 'time' in key:
                         temp_dict['latency'] = value
                     if 'throughput' in key:
                         temp_dict['avg_throughput'] = value

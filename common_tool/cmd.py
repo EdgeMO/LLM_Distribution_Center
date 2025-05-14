@@ -156,7 +156,6 @@ class CMD:
                 vis_socket.close()
                 
             return '', monitor.get_resource_stats()
-    
     def extract_after_start(self, text):
         start_marker = "[start]"
         end_marker = "[end]"

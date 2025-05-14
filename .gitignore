@@ -16,8 +16,7 @@ client_metrics.csv
 /model/*
 .Python
 build/
-*.zip
-*.txt
+*.zip*
 data.csv
 test.csv
 develop-eggs/
