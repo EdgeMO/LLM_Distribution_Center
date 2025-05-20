@@ -7,6 +7,7 @@ import threading
 import queue
 import socket
 import struct
+import psutil  # 新增导入
 from flask import Flask, render_template_string, jsonify, Response, send_file
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -32,6 +33,16 @@ class WebMetricsVisualizer:
         self.output_queue = queue.Queue()
         self.auto_refresh = True
         
+        # 新增系统资源监控数据存储
+        self.system_metrics = {
+            'timestamps': [],
+            'cpu_percent': [],
+            'memory_percent': [],
+            'memory_used': [],
+            'memory_total': []
+        }
+        self.sys_metrics_max_points = 60  # 存储最近60个数据点
+        
         # 创建 Flask 应用
         self.app = Flask(__name__)
         
@@ -46,6 +57,9 @@ class WebMetricsVisualizer:
         
         # 初始加载数据
         self.load_data()
+        
+        # 启动系统资源监控
+        self.start_system_monitoring()
 
     def setup_routes(self):
         """设置 Flask 路由"""
@@ -81,6 +95,23 @@ class WebMetricsVisualizer:
             chart_images = self.generate_chart_images()
             
             return jsonify(chart_images)
+        
+        @self.app.route('/system_metrics')
+        def get_system_metrics():
+            """获取系统资源指标的 API 端点"""
+            # 获取当前最新的系统资源指标
+            latest_metrics = {
+                'cpu_percent': self.system_metrics['cpu_percent'][-1] if self.system_metrics['cpu_percent'] else 0,
+                'memory_percent': self.system_metrics['memory_percent'][-1] if self.system_metrics['memory_percent'] else 0,
+                'memory_used': round(self.system_metrics['memory_used'][-1], 2) if self.system_metrics['memory_used'] else 0,
+                'memory_total': round(self.system_metrics['memory_total'][-1], 2) if self.system_metrics['memory_total'] else 0,
+            }
+            
+            # 返回历史数据和当前指标
+            return jsonify({
+                'history': self.system_metrics,
+                'latest': latest_metrics
+            })
         
         @self.app.route('/console_stream')
         def console_stream():
@@ -154,11 +185,11 @@ class WebMetricsVisualizer:
         }
 
     def generate_chart_images(self):
-        """生成图表的图像，只显示三个关键指标"""
+        """生成图表的图像，包括性能指标和系统资源图表"""
         chart_images = {}
         
         try:
-            # 创建 1x3 子图，只展示三个关键指标
+            # 创建 1x3 子图，保留原来的性能指标图表
             fig, axes = plt.subplots(1, 3, figsize=(15, 5))
             
             # 获取 x 轴数据
@@ -179,7 +210,7 @@ class WebMetricsVisualizer:
             
             # 3. 每批次吞吐量
             axes[2].plot(x, self.data['avg_throughput_score_per_batch'], 'r-o')
-            axes[2].set_title('Batch Throughput Score')
+            axes[2].set_title('Batch Utility Score')  # 更改标题为Utility Score
             axes[2].set_xlabel('Sequence')
             axes[2].set_ylabel('Score')
             
@@ -195,6 +226,42 @@ class WebMetricsVisualizer:
             
             # 关闭图表以释放内存
             plt.close(fig)
+            
+            # 新增: 创建系统资源监控图表
+            if self.system_metrics['timestamps']:
+                # 创建系统资源图表，包含CPU和内存使用率
+                fig2, axes2 = plt.subplots(2, 1, figsize=(12, 8))
+                
+                # 时间戳
+                x_time = self.system_metrics['timestamps']
+                
+                # CPU 使用率图表
+                axes2[0].plot(x_time, self.system_metrics['cpu_percent'], 'b-o')
+                axes2[0].set_title('CPU Usage')
+                axes2[0].set_ylabel('Usage (%)')
+                axes2[0].set_ylim([0, 100])
+                axes2[0].grid(True)
+                
+                # 内存使用率图表
+                axes2[1].plot(x_time, self.system_metrics['memory_percent'], 'r-o')
+                axes2[1].set_title('Memory Usage')
+                axes2[1].set_xlabel('Time')
+                axes2[1].set_ylabel('Usage (%)')
+                axes2[1].set_ylim([0, 100])
+                axes2[1].grid(True)
+                
+                # 调整布局
+                fig2.tight_layout()
+                
+                # 将系统资源图表转换为 base64 编码的图像
+                buf2 = io.BytesIO()
+                fig2.savefig(buf2, format='png', dpi=100)
+                buf2.seek(0)
+                img_str2 = base64.b64encode(buf2.read()).decode('utf-8')
+                chart_images['system_chart'] = img_str2
+                
+                # 关闭图表以释放内存
+                plt.close(fig2)
             
         except Exception as e:
             print(f"Error generating chart images: {e}")
@@ -258,6 +325,7 @@ class WebMetricsVisualizer:
         # 启动 socket 服务器线程
         server_thread = threading.Thread(target=socket_server, daemon=True)
         server_thread.start()
+        
     def handle_client_connection(self, client_socket):
         """处理客户端连接，接收命令输出"""
         try:
@@ -297,6 +365,7 @@ class WebMetricsVisualizer:
         finally:
             print("Client connection closed")
             client_socket.close()
+            
     def load_data(self):
         """加载 CSV 数据"""
         try:
@@ -318,6 +387,47 @@ class WebMetricsVisualizer:
         except Exception as e:
             print(f"Error loading data: {e}")
             return False
+
+    def start_system_monitoring(self):
+        """启动系统资源监控线程"""
+        def monitor_system_resources():
+            while True:
+                try:
+                    # 获取CPU使用率 (跨所有CPU核心)
+                    cpu_percent = psutil.cpu_percent(interval=1)
+                    
+                    # 获取内存使用情况
+                    memory = psutil.virtual_memory()
+                    memory_percent = memory.percent
+                    memory_used = memory.used / (1024 * 1024)  # MB
+                    memory_total = memory.total / (1024 * 1024)  # MB
+                    
+                    # 记录当前时间戳
+                    current_time = time.strftime("%H:%M:%S")
+                    
+                    # 更新数据存储
+                    self.system_metrics['timestamps'].append(current_time)
+                    self.system_metrics['cpu_percent'].append(cpu_percent)
+                    self.system_metrics['memory_percent'].append(memory_percent)
+                    self.system_metrics['memory_used'].append(memory_used)
+                    self.system_metrics['memory_total'].append(memory_total)
+                    
+                    # 限制存储数据点数量
+                    if len(self.system_metrics['timestamps']) > self.sys_metrics_max_points:
+                        for key in self.system_metrics:
+                            self.system_metrics[key] = self.system_metrics[key][-self.sys_metrics_max_points:]
+                    
+                    # 休眠 5 秒
+                    time.sleep(5)
+                    
+                except Exception as e:
+                    print(f"Error monitoring system resources: {e}")
+                    time.sleep(5)  # 出错时也等待5秒
+        
+        # 创建并启动监控线程
+        monitor_thread = threading.Thread(target=monitor_system_resources, daemon=True)
+        monitor_thread.start()
+        print("System resource monitoring started")
 
     def get_html_template(self):
         """获取 HTML 模板"""
@@ -499,6 +609,61 @@ class WebMetricsVisualizer:
                 flex-direction: column;
             }
         }
+        
+        /* 新增系统资源卡片样式 */
+        .system-metrics-container {
+            display: flex;
+            justify-content: space-between;
+            gap: 15px;
+        }
+        .system-metric-card {
+            flex: 1;
+            background-color: #fff;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+            position: relative;
+        }
+        .system-metric-title {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+        .system-metric-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .cpu-metric {
+            color: #007bff;
+        }
+        .memory-metric {
+            color: #dc3545;
+        }
+        .progress-bar-bg {
+            width: 100%;
+            height: 6px;
+            background-color: #e9ecef;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+        .cpu-bar {
+            background-color: #007bff;
+        }
+        .memory-bar {
+            background-color: #dc3545;
+        }
+        .system-metrics-details {
+            font-size: 0.8rem;
+            color: #6c757d;
+            margin-top: 8px;
+        }
     </style>
 </head>
 <body>
@@ -595,7 +760,39 @@ class WebMetricsVisualizer:
             </div>
         </div>
 
-        <!-- 新增: 最新一次运行数据详细信息 -->
+        <!-- 新增: 系统资源监控卡片 -->
+        <div class="row mb-3">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">System Resources</h5>
+                        <span class="badge bg-light text-dark" id="system-timestamp">Monitoring...</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="system-metrics-container">
+                            <div class="system-metric-card">
+                                <div class="system-metric-title">CPU Usage</div>
+                                <div class="system-metric-value cpu-metric" id="cpu-percent">0%</div>
+                                <div class="progress-bar-bg">
+                                    <div class="progress-bar-fill cpu-bar" id="cpu-bar" style="width: 0%"></div>
+                                </div>
+                                <div class="system-metrics-details" id="cpu-details">0% of all cores</div>
+                            </div>
+                            <div class="system-metric-card">
+                                <div class="system-metric-title">Memory Usage</div>
+                                <div class="system-metric-value memory-metric" id="memory-percent">0%</div>
+                                <div class="progress-bar-bg">
+                                    <div class="progress-bar-fill memory-bar" id="memory-bar" style="width: 0%"></div>
+                                </div>
+                                <div class="system-metrics-details" id="memory-details">0 MB / 0 MB</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 最新一次运行数据详细信息 -->
         <div class="row mb-3">
             <div class="col-12">
                 <div class="card">
@@ -619,7 +816,7 @@ class WebMetricsVisualizer:
                                 <div class="value" id="latest-accuracy">-</div>
                             </div>
                             <div class="metric-card highlight">
-                                <h6>Throughput</h6>
+                                <h6>Utility Score</h6>
                                 <div class="value" id="latest-throughput">-</div>
                             </div>
                             <div class="metric-card">
@@ -676,6 +873,22 @@ class WebMetricsVisualizer:
             </div>
         </div>
 
+        <!-- 新增: 系统资源图表 -->
+        <div class="row mb-3">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-danger text-white">
+                        <h5 class="mb-0">System Resource Charts</h5>
+                    </div>
+                    <div class="card-body p-2">
+                        <div class="chart-container">
+                            <img id="system-chart" class="chart-image" src="" alt="Loading system charts...">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="row">
             <div class="col-12">
                 <div class="card">
@@ -691,7 +904,7 @@ class WebMetricsVisualizer:
                                         <th>Model</th>
                                         <th>Time (ms)</th>
                                         <th>Accuracy</th>
-                                        <th>Throughput</th>
+                                        <th>Utility Score</th>
                                         <th>Batches</th>
                                         <th>Tasks</th>
                                         <th>Total Acc</th>
@@ -721,6 +934,7 @@ class WebMetricsVisualizer:
         let autoScroll = true;
         let autoRefresh = true;
         let refreshInterval = null;
+        let systemRefreshInterval = null;
         
         // DOM elements
         const offlineBanner = document.getElementById('offline-banner');
@@ -741,6 +955,16 @@ class WebMetricsVisualizer:
         const currentModel = document.getElementById('current-model');
         const allModels = document.getElementById('all-models');
         const taskIdList = document.getElementById('task-id-list');
+        
+        // 系统资源相关元素
+        const systemChart = document.getElementById('system-chart');
+        const cpuPercent = document.getElementById('cpu-percent');
+        const memoryPercent = document.getElementById('memory-percent');
+        const cpuBar = document.getElementById('cpu-bar');
+        const memoryBar = document.getElementById('memory-bar');
+        const cpuDetails = document.getElementById('cpu-details');
+        const memoryDetails = document.getElementById('memory-details');
+        const systemTimestamp = document.getElementById('system-timestamp');
         
         // Latest run elements
         const latestRunTimestamp = document.getElementById('latest-run-timestamp');
@@ -787,8 +1011,12 @@ class WebMetricsVisualizer:
             // Start auto refresh
             startAutoRefresh();
             
+            // Start system metrics refresh
+            startSystemMetricsRefresh();
+            
             // Initial data load
             refreshData();
+            refreshSystemMetrics();
         }
         
         // Update online status
@@ -836,6 +1064,84 @@ class WebMetricsVisualizer:
             }
         }
         
+        // Start system metrics refresh
+        function startSystemMetricsRefresh() {
+            if (systemRefreshInterval) {
+                clearInterval(systemRefreshInterval);
+            }
+            systemRefreshInterval = setInterval(refreshSystemMetrics, 3000);
+        }
+        
+        // Refresh system metrics
+        function refreshSystemMetrics() {
+            if (!navigator.onLine) {
+                // 离线模式下不刷新系统指标
+                return;
+            }
+            
+            fetch('/system_metrics')
+                .then(response => response.json())
+                .then(data => {
+                    // 更新系统资源UI
+                    updateSystemMetricsUI(data.latest);
+                    
+                    // 更新系统资源图表
+                    if (data.history && data.history.timestamps && data.history.timestamps.length > 0) {
+                        fetch('/charts')
+                            .then(response => response.json())
+                            .then(chartData => {
+                                if (chartData.system_chart) {
+                                    systemChart.src = 'data:image/png;base64,' + chartData.system_chart;
+                                    localStorage.setItem('cachedSystemChart', chartData.system_chart);
+                                }
+                            })
+                            .catch(error => {
+                                console.error('Error fetching system charts:', error);
+                                // 尝试加载缓存的图表
+                                const cachedChart = localStorage.getItem('cachedSystemChart');
+                                if (cachedChart) {
+                                    systemChart.src = 'data:image/png;base64,' + cachedChart;
+                                }
+                            });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching system metrics:', error);
+                });
+        }
+        
+        // Update system metrics UI
+        function updateSystemMetricsUI(metrics) {
+            if (!metrics) return;
+            
+            // 更新 CPU 使用率
+            cpuPercent.textContent = `${metrics.cpu_percent.toFixed(1)}%`;
+            cpuBar.style.width = `${metrics.cpu_percent}%`;
+            cpuDetails.textContent = `${metrics.cpu_percent.toFixed(1)}% of all cores`;
+            
+            // 更新内存使用率
+            memoryPercent.textContent = `${metrics.memory_percent.toFixed(1)}%`;
+            memoryBar.style.width = `${metrics.memory_percent}%`;
+            memoryDetails.textContent = `${metrics.memory_used.toFixed(0)} MB / ${metrics.memory_total.toFixed(0)} MB`;
+            
+            // 更新时间戳
+            const now = new Date();
+            systemTimestamp.textContent = `Last Update: ${now.toLocaleTimeString()}`;
+            
+            // 当内存或CPU使用率过高时，添加警告样式
+            if (metrics.cpu_percent > 80) {
+                cpuPercent.style.color = '#dc3545';
+            } else {
+                cpuPercent.style.color = '#007bff';
+            }
+            
+            if (metrics.memory_percent > 80) {
+                memoryPercent.style.color = '#dc3545';
+            } else {
+                memoryPercent.style.color = '#dc3545';
+            }
+        }
+        
         // Refresh data
         function refreshData() {
             if (!navigator.onLine) {
@@ -873,11 +1179,12 @@ class WebMetricsVisualizer:
                 .then(data => {
                     if (data.main_chart) {
                         mainChart.src = 'data:image/png;base64,' + data.main_chart;
-                        
-                        // Cache the chart
                         localStorage.setItem('cachedChart', data.main_chart);
-                    } else if (data.error) {
-                        console.error('Error generating charts:', data.error);
+                    }
+                    
+                    if (data.system_chart) {
+                        systemChart.src = 'data:image/png;base64,' + data.system_chart;
+                        localStorage.setItem('cachedSystemChart', data.system_chart);
                     }
                 })
                 .catch(error => {
@@ -886,6 +1193,10 @@ class WebMetricsVisualizer:
                     const cachedChart = localStorage.getItem('cachedChart');
                     if (cachedChart) {
                         mainChart.src = 'data:image/png;base64,' + cachedChart;
+                    }
+                    const cachedSystemChart = localStorage.getItem('cachedSystemChart');
+                    if (cachedSystemChart) {
+                        systemChart.src = 'data:image/png;base64,' + cachedSystemChart;
                     }
                 });
         }
@@ -930,6 +1241,7 @@ class WebMetricsVisualizer:
                     stats: currentStats,
                     sequence: currentSequence,
                     chart: localStorage.getItem('cachedChart'),
+                    systemChart: localStorage.getItem('cachedSystemChart'),
                     console: consoleLines
                 };
                 
@@ -1098,6 +1410,11 @@ class WebMetricsVisualizer:
                     const cachedChart = localStorage.getItem('cachedChart');
                     if (cachedChart) {
                         mainChart.src = 'data:image/png;base64,' + cachedChart;
+                    }
+                    
+                    const cachedSystemChart = localStorage.getItem('cachedSystemChart');
+                    if (cachedSystemChart) {
+                        systemChart.src = 'data:image/png;base64,' + cachedSystemChart;
                     }
                     
                     // Restore console output

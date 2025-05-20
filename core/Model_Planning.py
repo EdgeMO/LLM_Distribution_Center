@@ -49,7 +49,7 @@ class Core:
         self.center.establish_connection()
         for sequence in range(300):
             # 生成当前时刻下的任务集合
-            task_set = self.input_generator.generate_task_set_for_each_timestamp(2)
+            task_set = self.input_generator.generate_task_set_for_each_timestamp(1)
             formated_input_for_algorithm = []
             """            
             {
@@ -145,7 +145,7 @@ class Core:
                         temp_dict['avg_throughput'] = value
                 update_system_observation.append(temp_dict)
             core_data_need_to_record = {}
-            core_data_need_to_record['task_inference_time'] = task_distribution_end_time - task_distribution_start_time
+            core_data_need_to_record['latency'] = task_distribution_end_time - task_distribution_start_time
             core_data_need_to_record['edge_observation'] = update_system_observation
             core_data_need_to_record['sequence'] = sequence
             core_data_need_to_record['message_list']=message_list
@@ -167,7 +167,7 @@ class Core:
             # 创建单行数据
             row = {
                 'sequence': data['sequence'],
-                'task_inference_time': data['task_inference_time']
+                'latency': data['latency']
             }
             
             # 从message_list中提取任务ID和类型信息，并按edge_id分组

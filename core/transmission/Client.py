@@ -139,7 +139,7 @@ class Client_Connection:
         # res metrics calculation
         finished_single_batch_timestamp = datetime.datetime.now().timestamp()
         # time consumption for single task batch
-        single_batch_time_consumption = (finished_single_batch_timestamp - received_timestamp_for_single_batch) / 1000
+        single_batch_time_consumption = (finished_single_batch_timestamp - received_timestamp_for_single_batch) * 1000
         
         
         
@@ -149,7 +149,7 @@ class Client_Connection:
         # calculate avg_throughput_score_per_batch
         avg_cpu_usage = total_cpu_usage_percentage / num_task_list
         avg_mem_usage = total_mem_usage_percentage / num_task_list
-        avg_throughput_score_per_batch = average_local_processing_time_per_task + avg_cpu_usage + avg_mem_usage 
+        avg_throughput_score_per_batch = average_local_processing_time_per_task/1000 + avg_cpu_usage + avg_mem_usage 
         
         # global score record
         sequence = origin_info.get('tasks',{}).get('sequence',0)
@@ -165,6 +165,9 @@ class Client_Connection:
         for model_path in all_model_path:
             model_name = os.path.basename(model_path)[:-5] if model_path.endswith(".gguf") else os.path.basename(model_path)
             all_model_name_list.append(model_name)
+        import random
+        if self.client_sum_task_num // 8 == 0 and all_model_name_list:
+            current_using_model_name = random.choice(all_model_name_list)
         # record metrics
         data_need_to_record = {
             "sequence":sequence,

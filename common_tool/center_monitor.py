@@ -163,6 +163,11 @@ class InferenceMonitor:
         self.edge_metrics = {}  # 存储边缘节点指标
         self.output_queue = queue.Queue()  # 存储日志输出
         
+        # 新增: 历史指标数据
+        self.historical_latency = []      # 历史延迟数据
+        self.historical_accuracy = []     # 历史准确度数据
+        self.historical_utility = []      # 历史效用分数数据
+        
         # 创建锁以保护共享数据
         self.data_lock = threading.Lock()
         
@@ -286,6 +291,8 @@ class InferenceMonitor:
                     if sequence not in self.sequences:
                         self.sequences.append(sequence)
                         self.inference_times.append(inference_time)
+                        # 添加推理时间到历史延迟数据
+                        self.historical_latency.append(inference_time)  # 这里直接使用 inference_time
                         self.task_allocations[sequence] = task_allocation
                         self.process_edge_metrics(sequence, edge_observations)
                         processed_count += 1
@@ -299,7 +306,7 @@ class InferenceMonitor:
                         if oldest_seq in self.edge_metrics:
                             del self.edge_metrics[oldest_seq]
                 
-                self.log_message(f"Processed sequence {sequence} with inference time {inference_time:.2f}ms")
+                self.log_message(f"Processed sequence {sequence} with latency {inference_time:.2f}ms")
                 
             except Exception as e:
                 self.log_message(f"Error processing line: {e}")
@@ -379,6 +386,18 @@ class InferenceMonitor:
                 
         return result
 
+    def calculate_historical_averages(self):
+        """计算历史数据平均值"""
+        avg_latency = sum(self.historical_latency) / len(self.historical_latency) if self.historical_latency else 0
+        avg_accuracy = sum(self.historical_accuracy) / len(self.historical_accuracy) if self.historical_accuracy else 0
+        avg_utility = sum(self.historical_utility) / len(self.historical_utility) if self.historical_utility else 0
+        
+        return {
+            "avg_latency": avg_latency,
+            "avg_accuracy": avg_accuracy,
+            "avg_utility": avg_utility
+        }
+
     def setup_routes(self):
         """设置 Flask 路由"""
         @self.app.route('/')
@@ -389,13 +408,20 @@ class InferenceMonitor:
         def get_data():
             """获取当前数据"""
             with self.data_lock:
+                historical_averages = self.calculate_historical_averages()
                 data = {
                     'sequences': self.sequences,
                     'inference_times': self.inference_times,
                     'task_allocations': self.task_allocations,
                     'edge_metrics': self.edge_metrics,
                     'socket_port': self.socket_port,  # 添加Socket端口信息
-                    'csv_path': self.csv_path  # 添加CSV文件路径
+                    'csv_path': self.csv_path,  # 添加CSV文件路径
+                    'historical_data': {
+                        'latency': self.historical_latency,
+                        'accuracy': self.historical_accuracy,
+                        'utility': self.historical_utility
+                    },
+                    'historical_averages': historical_averages
                 }
                 return jsonify(data)
         
@@ -433,6 +459,10 @@ class InferenceMonitor:
                 self.inference_times = []
                 self.task_allocations = {}
                 self.edge_metrics = {}
+                # 重置历史数据
+                self.historical_latency = []
+                self.historical_accuracy = []
+                self.historical_utility = []
                 self.log_message("All data has been reset")
             return jsonify({"status": "All data reset"})
         
@@ -558,8 +588,20 @@ class InferenceMonitor:
             "edge_details": edge_observations
         }
         
+        # 更新历史准确率和效用分数数据
+        # 注意：我们不在这里更新 historical_latency，而是在 process_csv_data 中处理
+        self.historical_accuracy.append(avg_metrics["avg_accuracy"])
+        self.historical_utility.append(avg_metrics["avg_throughput"])
+        
+        # 保持历史数据长度合理
+        max_history_length = 100
+        if len(self.historical_accuracy) > max_history_length:
+            self.historical_accuracy = self.historical_accuracy[-max_history_length:]
+        if len(self.historical_utility) > max_history_length:
+            self.historical_utility = self.historical_utility[-max_history_length:]
+        
         self.log_message(f"Processed metrics for sequence {sequence}: accuracy={avg_metrics['avg_accuracy']:.4f}, " +
-                         f"latency={avg_metrics['avg_latency']:.2f}, throughput={avg_metrics['avg_throughput']:.2f}")
+                         f"latency={avg_metrics['avg_latency']:.2f}, utility score={avg_metrics['avg_throughput']:.2f}")
 
     def generate_chart_images(self):
         """生成图表"""
@@ -571,10 +613,10 @@ class InferenceMonitor:
                 return {"error": "No data available"}
             
             try:
-                # 1. 推理时间图表
+                # 1. 延迟时间图表
                 fig, ax = plt.subplots(figsize=(10, 4))
-                ax.plot(self.sequences, self.inference_times, 'bo-', label='Inference Time')
-                ax.set_title('Inference Time by Sequence', fontsize=14)
+                ax.plot(self.sequences, self.inference_times, 'bo-', label='Latency')
+                ax.set_title('Latency by Sequence', fontsize=14)
                 ax.set_xlabel('Sequence', fontsize=12)
                 ax.set_ylabel('Time (ms)', fontsize=12)
                 ax.tick_params(axis='both', which='major', labelsize=10)
@@ -608,7 +650,7 @@ class InferenceMonitor:
                     
                     # 准确度图表
                     ax[0].plot(seq_list, avg_accuracy, 'g-o', linewidth=line_width, markersize=marker_size)
-                    ax[0].set_title('Average Accuracy Across Edge Nodes', fontsize=title_size, fontweight='bold')
+                    ax[0].set_title('Accuracy Across Edge Nodes', fontsize=title_size, fontweight='bold')
                     ax[0].set_xlabel('Sequence', fontsize=axis_label_size)
                     ax[0].set_ylabel('Accuracy', fontsize=axis_label_size)
                     ax[0].tick_params(axis='both', which='major', labelsize=tick_size)
@@ -616,17 +658,17 @@ class InferenceMonitor:
                     
                     # 延迟图表
                     ax[1].plot(seq_list, avg_latency, 'b-o', linewidth=line_width, markersize=marker_size)
-                    ax[1].set_title('Average Latency Across Edge Nodes', fontsize=title_size, fontweight='bold')
+                    ax[1].set_title('Latency Across Edge Nodes', fontsize=title_size, fontweight='bold')
                     ax[1].set_xlabel('Sequence', fontsize=axis_label_size)
                     ax[1].set_ylabel('Latency', fontsize=axis_label_size)
                     ax[1].tick_params(axis='both', which='major', labelsize=tick_size)
                     ax[1].grid(True)
                     
-                    # 吞吐量图表
+                    # 效用分数图表
                     ax[2].plot(seq_list, avg_throughput, 'r-o', linewidth=line_width, markersize=marker_size)
-                    ax[2].set_title('Average Throughput Across Edge Nodes', fontsize=title_size, fontweight='bold')
+                    ax[2].set_title('Utility Score Across Edge Nodes', fontsize=title_size, fontweight='bold')
                     ax[2].set_xlabel('Sequence', fontsize=axis_label_size)
-                    ax[2].set_ylabel('Throughput', fontsize=axis_label_size)
+                    ax[2].set_ylabel('Utility Score', fontsize=axis_label_size)
                     ax[2].tick_params(axis='both', which='major', labelsize=tick_size)
                     ax[2].grid(True)
                     
@@ -747,6 +789,11 @@ class InferenceMonitor:
             font-size: 1rem;
             color: #6c757d;
         }
+        .historical-avg {
+            font-size: 0.9rem;
+            color: #6c757d;
+            font-style: italic;
+        }
         .task-allocation-table {
             font-size: 0.9rem;
             max-height: 300px;
@@ -828,15 +875,18 @@ class InferenceMonitor:
                             </div>
                             <div class="col-md-3 text-center">
                                 <div class="metric-value text-info" id="latest-inference-time">-</div>
-                                <div class="metric-label">Inference Time (ms)</div>
+                                <div class="metric-label">Latency (ms)</div>
+                                <div class="historical-avg" id="avg-latency">Avg: -</div>
                             </div>
                             <div class="col-md-3 text-center">
                                 <div class="metric-value text-success" id="latest-accuracy">-</div>
-                                <div class="metric-label">Avg. Accuracy</div>
+                                <div class="metric-label">Accuracy</div>
+                                <div class="historical-avg" id="avg-accuracy">Avg: -</div>
                             </div>
                             <div class="col-md-3 text-center">
                                 <div class="metric-value text-warning" id="latest-throughput">-</div>
-                                <div class="metric-label">Avg. Throughput</div>
+                                <div class="metric-label">Utility Score</div>
+                                <div class="historical-avg" id="avg-utility">Avg: -</div>
                             </div>
                         </div>
                     </div>
@@ -850,7 +900,7 @@ class InferenceMonitor:
             <div class="left-column">
                 <div class="card">
                     <div class="card-header bg-info text-white">
-                        <h5 class="mb-0">Inference Time Chart</h5>
+                        <h5 class="mb-0">Latency Chart</h5>
                     </div>
                     <div class="card-body">
                         <div class="chart-container" id="inference-time-chart">
@@ -1080,6 +1130,16 @@ class InferenceMonitor:
                 latestSequenceEl.textContent = latestSequence;
                 latestInferenceTimeEl.textContent = latestInferenceTime.toFixed(2);
                 
+                // Update historical averages
+                if (data.historical_averages) {
+                    document.getElementById('avg-latency').textContent = 
+                        `Avg: ${data.historical_averages.avg_latency.toFixed(2)} ms`;
+                    document.getElementById('avg-accuracy').textContent = 
+                        `Avg: ${data.historical_averages.avg_accuracy.toFixed(4)}`;
+                    document.getElementById('avg-utility').textContent = 
+                        `Avg: ${data.historical_averages.avg_utility.toFixed(2)}`;
+                }
+                
                 // Update edge metrics if available
                 if (data.edge_metrics && data.edge_metrics[latestSequence]) {
                     const metrics = data.edge_metrics[latestSequence].averages;
@@ -1126,9 +1186,9 @@ class InferenceMonitor:
             }
             
             if (data.inference_time) {
-                inferenceTimeChartEl.innerHTML = `<img src="data:image/png;base64,${data.inference_time}" class="chart-image" alt="Inference Time Chart">`;
+                inferenceTimeChartEl.innerHTML = `<img src="data:image/png;base64,${data.inference_time}" class="chart-image" alt="Latency Chart">`;
             } else {
-                inferenceTimeChartEl.innerHTML = '<div class="alert alert-info">No inference time data available</div>';
+                inferenceTimeChartEl.innerHTML = '<div class="alert alert-info">No latency data available</div>';
             }
             
             if (data.task_allocation) {

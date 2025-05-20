@@ -1,5 +1,5 @@
 # LLM Distribution Center
-
+-i https://pypi.tuna.tsinghua.edu.cn/simple
 This document describes the code implementation of the center. The main steps include:
 
 1. Establish the connection between edge nodes and the center, register all edge nodes and keep the connection alive throughout the process.
